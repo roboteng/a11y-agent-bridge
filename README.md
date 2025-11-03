@@ -138,9 +138,30 @@ This library is designed to be consumed by AI coding agents like Claude Code. Th
 
 1. Agent starts the target application with MCP server enabled
 2. Agent sends `query_tree` to understand the UI
-3. Agent sends `find_by_name` to locate specific elements
+3. Agent traverses the tree to locate specific elements (buttons, sliders, etc.)
 4. Agent sends `perform_action` to interact with elements
 5. Agent verifies expected behavior
+
+### Real Example
+
+```bash
+# 1. Start the app (already has MCP server built-in)
+cargo run --example egui_app
+
+# 2. Query the accessibility tree
+echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+
+# 3. Traverse to find a slider (role: "AXSlider")
+echo '{"protocol_version":"1.0","method":"get_node","node_id":"<slider_id>"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+
+# 4. Control the slider
+echo '{"protocol_version":"1.0","method":"perform_action","node_id":"<slider_id>","action":{"type":"increment"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+
+# 5. Click a button
+echo '{"protocol_version":"1.0","method":"perform_action","node_id":"<button_id>","action":{"type":"press"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+```
+
+This enables automated UI testing, accessibility verification, and remote control of applications!
 
 ## Configuration
 
@@ -192,10 +213,16 @@ Example response:
       "role": "AXApplication",
       "name": "egui_app",
       "actions": [{"type": "focus"}],
-      "children": []
+      "children": ["0x6000008d4200", "0x6000008d4300"]
     }]
   }
 }
+```
+
+You can then query child nodes, find buttons, sliders, etc., and perform actions on them:
+```bash
+# Find a slider and increment it
+echo '{"protocol_version":"1.0","method":"perform_action","node_id":"0x123abc","action":{"type":"increment"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
 ```
 
 ### Minimal Server (stdio)
@@ -212,12 +239,22 @@ echo '{"protocol_version":"1.0","method":"query_tree"}' | cargo run --example mi
 
 ## Current Limitations
 
-- Children enumeration not fully implemented (returns empty array)
 - Bounds/coordinates not extracted yet
-- Limited action support (Focus, Press only)
-- `find_by_name` not implemented
+- `set_value` action not yet implemented
+- `scroll` and `context_menu` actions not yet implemented
+- `find_by_name` not implemented (requires manual tree traversal)
 - macOS only (Windows and Linux planned)
 - Requires accessibility permissions on macOS
+
+## What's Working
+
+- ✅ Full accessibility tree traversal with children enumeration
+- ✅ Actions: `focus`, `press`, `increment`, `decrement`
+- ✅ Unix socket transport for GUI applications
+- ✅ Stdio transport for CLI tools
+- ✅ Finding UI elements by traversing the tree
+- ✅ Performing actions on buttons, sliders, and other controls
+- ✅ Successfully tested with egui applications
 
 ## Architecture
 
