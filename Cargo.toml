@@ -14,5 +14,3 @@ authors = ["Accessibility MCP Contributors"]
 accessibility_mcp = { path = "crates/accessibility_mcp" }
 tokio = { version = "1.40", features = ["rt", "rt-multi-thread", "sync", "time", "io-std", "io-util", "macros", "net"] }
 anyhow = "1.0"
-eframe = "0.29"
-egui = "0.29"
