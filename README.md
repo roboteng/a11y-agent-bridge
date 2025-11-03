@@ -114,6 +114,17 @@ Find nodes by name:
 | Windows | UI Automation | 🚧 Planned |
 | Linux | AT-SPI2 | 🚧 Planned |
 
+### macOS Permissions
+
+On macOS, the application needs accessibility permissions to query its own accessibility tree:
+
+1. Run your application
+2. When prompted, grant accessibility permissions
+3. Alternatively, manually add your app in:
+   **System Preferences > Privacy & Security > Accessibility**
+
+**Note:** Command-line tools may not be able to access the accessibility API even for self-inspection. GUI applications (like the egui example) work best.
+
 ## For Coding Agents
 
 This library is designed to be consumed by AI coding agents like Claude Code. The MCP protocol provides a standardized way to:

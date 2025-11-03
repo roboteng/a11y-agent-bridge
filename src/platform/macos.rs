@@ -24,6 +24,8 @@ type AXError = i32;
 type CFTypeRef = *const std::ffi::c_void;
 
 const K_AX_ERROR_SUCCESS: AXError = 0;
+const K_AX_ERROR_API_DISABLED: AXError = -25208;
+const K_AX_ERROR_NO_VALUE: AXError = -25209;
 
 // Common AX attribute constants
 const K_AX_ROLE_ATTRIBUTE: &str = "AXRole";
@@ -84,12 +86,36 @@ impl MacOSProvider {
         let result =
             AXUIElementCopyAttributeValue(element, attr_name.as_concrete_TypeRef(), &mut value);
 
+        if result == K_AX_ERROR_API_DISABLED {
+            // Only log this once to avoid spam
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                tracing::warn!(
+                    "Accessibility API is disabled. This app may need to be granted accessibility \
+                     permissions in System Preferences > Privacy & Security > Accessibility."
+                );
+            }
+            return None;
+        }
+
+        if result == K_AX_ERROR_NO_VALUE {
+            // Attribute doesn't exist on this element, which is normal
+            return None;
+        }
+
         if result == K_AX_ERROR_SUCCESS && !value.is_null() {
             let cf_value = CFType::wrap_under_create_rule(value);
+
             // Try to downcast to CFString
             if let Some(string) = cf_value.downcast::<CFString>() {
                 return Some(string.to_string());
+            } else {
+                // Debug: what type did we get?
+                tracing::debug!("Attribute {} returned non-string type", attr);
             }
+        } else if result != K_AX_ERROR_SUCCESS {
+            tracing::debug!("Failed to get attribute {}: error {}", attr, result);
         }
 
         None

@@ -15,8 +15,8 @@
 //! }
 //! ```
 
-mod platform;
-mod protocol;
+pub mod platform;
+pub mod protocol;
 mod server;
 
 pub use protocol::{Action, Node, NodeId, Rect};
