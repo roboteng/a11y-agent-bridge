@@ -1,35 +1,18 @@
-[package]
-name = "accessibility_mcp"
-version = "0.1.0"
+[workspace]
+resolver = "2"
+members = [
+    "crates/accessibility_mcp",
+    "crates/egui_app",
+]
+
+[workspace.package]
 edition = "2021"
-authors = ["Accessibility MCP Contributors"]
 license = "MIT OR Apache-2.0"
-description = "MCP server for exposing accessibility trees to coding agents"
-repository = "https://github.com/yourusername/accessibility_mcp"
+authors = ["Accessibility MCP Contributors"]
 
-[features]
-default = []
-accessibility_mcp = []
-
-[dependencies]
+[workspace.dependencies]
+accessibility_mcp = { path = "crates/accessibility_mcp" }
 tokio = { version = "1.40", features = ["rt", "rt-multi-thread", "sync", "time", "io-std", "io-util", "macros", "net"] }
 anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10"
-core-graphics = "0.24"
-objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSString", "NSArray"] }
-
-[dev-dependencies]
-tokio-test = "0.4"
 eframe = "0.29"
 egui = "0.29"
-
-[lib]
-name = "accessibility_mcp"
-path = "src/lib.rs"

@@ -4,7 +4,11 @@ A Model Context Protocol (MCP) server that exposes an application's accessibilit
 
 ## Overview
 
-This crate allows coding agents to inspect and interact with native application UIs through the same accessibility APIs used by assistive technologies. No modifications to the target application are required - it works with any app that properly implements accessibility.
+This workspace provides:
+- **`accessibility_mcp`**: A library crate that provides the MCP server for exposing accessibility trees
+- **`egui_app`**: A demo application showcasing optional feature-flag integration
+
+Coding agents can inspect and interact with native application UIs through the same accessibility APIs used by assistive technologies. No modifications to the target application are required - it works with any app that properly implements accessibility.
 
 ## Quick Start
 
@@ -145,8 +149,8 @@ This library is designed to be consumed by AI coding agents like Claude Code. Th
 ### Real Example
 
 ```bash
-# 1. Start the app (already has MCP server built-in)
-cargo run --example egui_app
+# 1. Start the app with MCP server enabled
+cargo run -p egui_app --features a11y_mcp
 
 # 2. Query the accessibility tree
 echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
@@ -189,14 +193,21 @@ let _mcp = start_mcp_server(Some(config))?;
 
 ## Examples
 
-### GUI Application with Unix Socket
+### GUI Application with Feature Flag
 
-Run the egui demo app:
+The egui demo app can run with or without the MCP server:
+
+**Without MCP server** (production mode):
 ```bash
-cargo run --example egui_app
+cargo run -p egui_app
 ```
 
-The app will display the socket path in the UI. Connect to it:
+**With MCP server** (development/testing mode):
+```bash
+cargo run -p egui_app --features a11y_mcp
+```
+
+When the `a11y_mcp` feature is enabled, the app will display the socket path in the UI. Connect to it:
 ```bash
 # Get the PID from the UI or from ps
 echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
@@ -225,16 +236,19 @@ You can then query child nodes, find buttons, sliders, etc., and perform actions
 echo '{"protocol_version":"1.0","method":"perform_action","node_id":"0x123abc","action":{"type":"increment"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
 ```
 
-### Minimal Server (stdio)
+### Library Examples
 
-Run the minimal server:
-```bash
-cargo run --example minimal_server
-```
+The `accessibility_mcp` library crate includes additional examples:
 
-Then send requests:
 ```bash
-echo '{"protocol_version":"1.0","method":"query_tree"}' | cargo run --example minimal_server
+# Minimal server (stdio)
+cargo run -p accessibility_mcp --example minimal_server
+
+# Test provider directly
+cargo run -p accessibility_mcp --example test_provider
+
+# Simple server
+cargo run -p accessibility_mcp --example simple_server
 ```
 
 ## Current Limitations
