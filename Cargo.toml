@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/accessibility_mcp",
     "crates/egui_app",
+    "crates/dioxus_app",
 ]
 
 [workspace.package]

@@ -1,28 +1,4 @@
-   0.427072530s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp/crates/accessibility_mcp) target="egui_app"}: cargo::core::compiler::fingerprint: fingerprint error for accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp/crates/accessibility_mcp)/Check { test: false }/TargetInner { kind: "example", name: "egui_app", tested: false, benched: false, ..: with_path("/Users/tws/develop/accessibility_mcp/crates/accessibility_mcp/examples/egui_app.rs", Edition2021) }
-   0.427150542s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp/crates/accessibility_mcp) target="egui_app"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/tws/.cargo/target/debug/.fingerprint/accessibility_mcp-8ce9a8e5edb14e05/example-egui_app`
-
-Caused by:
-    No such file or directory (os error 2)
-
-Stack backtrace:
-   0: std::backtrace::Backtrace::create
-   1: std::backtrace::Backtrace::capture
-   2: cargo_util::paths::read_bytes
-   3: cargo_util::paths::read
-   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
-   5: cargo::core::compiler::fingerprint::prepare_target
-   6: cargo::core::compiler::compile
-   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
-   8: cargo::ops::cargo_compile::compile_ws
-   9: cargo::ops::cargo_compile::compile_with_exec
-  10: cargo::ops::cargo_compile::compile
-  11: cargo::commands::check::exec
-  12: <cargo::cli::Exec>::exec
-  13: cargo::main
-  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
-  15: std::rt::lang_start::<()>::{closure#0}
-  16: std::rt::lang_start_internal
-  17: _main
-  18: <unknown>
-    Checking accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp/crates/accessibility_mcp)
-error: could not compile `accessibility_mcp` (example "egui_app") due to 6 previous errors
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory

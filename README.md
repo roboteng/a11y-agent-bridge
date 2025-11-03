@@ -6,7 +6,8 @@ A Model Context Protocol (MCP) server that exposes an application's accessibilit
 
 This workspace provides:
 - **`accessibility_mcp`**: A library crate that provides the MCP server for exposing accessibility trees
-- **`egui_app`**: A demo application showcasing optional feature-flag integration
+- **`egui_app`**: Demo application with manual Tokio runtime (egui doesn't use async)
+- **`dioxus_app`**: Demo application with seamless integration (Dioxus ships with Tokio)
 
 Coding agents can inspect and interact with native application UIs through the same accessibility APIs used by assistive technologies. No modifications to the target application are required - it works with any app that properly implements accessibility.
 
@@ -149,8 +150,8 @@ This library is designed to be consumed by AI coding agents like Claude Code. Th
 ### Real Example
 
 ```bash
-# 1. Start the app with MCP server enabled
-cargo run -p egui_app --features a11y_mcp
+# 1. Start the app with MCP server enabled (using Dioxus for clean integration)
+cargo run -p dioxus_app --features a11y_mcp
 
 # 2. Query the accessibility tree
 echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
@@ -193,16 +194,34 @@ let _mcp = start_mcp_server(Some(config))?;
 
 ## Examples
 
-### GUI Application with Feature Flag
+### GUI Applications with Feature Flag
 
-The egui demo app can run with or without the MCP server:
+We provide two demo applications showcasing different integration patterns:
+
+#### Dioxus App (Recommended - Seamless Integration)
+
+Dioxus ships with Tokio, so integration is clean and simple:
 
 **Without MCP server** (production mode):
+```bash
+cargo run -p dioxus_app
+```
+
+**With MCP server** (development/testing mode):
+```bash
+cargo run -p dioxus_app --features a11y_mcp
+```
+
+#### Egui App (Manual Runtime Pattern)
+
+Egui doesn't use Tokio, demonstrating the pattern for non-async frameworks:
+
+**Without MCP server**:
 ```bash
 cargo run -p egui_app
 ```
 
-**With MCP server** (development/testing mode):
+**With MCP server**:
 ```bash
 cargo run -p egui_app --features a11y_mcp
 ```

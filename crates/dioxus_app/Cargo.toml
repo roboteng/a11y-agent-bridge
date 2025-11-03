@@ -1,0 +1,20 @@
+[package]
+name = "dioxus_app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = []
+a11y_mcp = ["dep:accessibility_mcp"]
+
+[dependencies]
+dioxus = { version = "0.6", features = ["desktop"] }
+
+# Optional dependencies - only included when a11y_mcp feature is enabled
+accessibility_mcp = { workspace = true, optional = true }
+
+[[bin]]
+name = "dioxus_app"
+path = "src/main.rs"
