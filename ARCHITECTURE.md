@@ -313,3 +313,332 @@ Dual-licensed under MIT or Apache-2.0, same as AccessKit.
 * [AT-SPI2 D-Bus Specification](https://gitlab.gnome.org/GNOME/at-spi2-core)
 * [UI Automation (Microsoft Docs)](https://learn.microsoft.com/en-us/windows/win32/winauto/entry-uiauto-win32)
 * [AXAPI (Apple Developer Docs)](https://developer.apple.com/documentation/applicationservices/accessibility)
+
+# Accessibility MCP Server — Design Clarifications and Open Questions
+
+This document expands on `ARCHITECTURE.md` and clarifies several design questions
+around process identification, transport, concurrency, error handling, and other
+implementation subtleties.
+
+---
+
+## 1. Process Identification & Bootstrapping
+
+### How the MCP Server Identifies the Host App
+
+- **macOS:** Use `AXUIElementCreateApplication(getpid())` to obtain the root accessibility object.
+- **Windows:** Use `GetCurrentProcess()` + `GetForegroundWindow()` to identify the main HWND, then
+  `IUIAutomation::ElementFromHandle(hwnd)` as the root.
+- **Linux:** Use the process’s `pid` and application name to locate its root AT-SPI node
+  via the D-Bus registry (`/org/a11y/atspi/accessible/root`).
+
+In all cases, **the current process’s PID is used as the key identifier**, meaning
+the server always scopes itself to “the app it’s running inside.”
+
+### Timing and Accessibility Tree Initialization
+
+If the MCP server is started **before the accessibility tree exists**, it will:
+1. Attempt to connect to the platform API.
+2. If the root element is not yet available, retry a limited number of times (e.g. exponential backoff for up to 2 seconds).
+3. Once successful, it holds a reference to the root and can answer queries.
+
+In frameworks using AccessKit, `start_mcp_server()` should be called **after**
+the platform adapter has been initialized. For other frameworks, this retry behavior
+should suffice.
+
+---
+
+## 2. Transport Layer
+
+### Supported Transports
+
+| Transport | Use Case | Notes |
+|------------|-----------|-------|
+| **stdio** | Default. Suitable when the agent launches the app as a subprocess. | Simple, robust, no configuration needed. |
+| **unix socket / named pipe** | Useful for IDEs or local tools that need to connect to a running app. | Path or name is logged on startup. |
+| **TCP** | Optional, for distributed testing. | Should be disabled in production. |
+
+### Discovery
+
+By default, the server prints its transport details to stderr in a structured form:
+
+```
+
+[MCP] listening on stdio
+[MCP] listening on unix socket at /tmp/accessibility_mcp_<pid>.sock
+
+````
+
+Agents can discover or attach using these details.
+No discovery protocol is implemented initially; later versions may include
+an environment-variable-based registration system (`ACCESSIBILITY_MCP_SOCKET`).
+
+---
+
+## 3. Node ID Model
+
+### Generation and Stability
+
+- Each platform backend assigns a **stable identifier** for each node.
+- `NodeId` is a string wrapper (`String`), and platform backends decide the format.
+
+| Platform | NodeId Source | Stability |
+|-----------|----------------|-----------|
+| macOS | `AXUIElementRef` pointer value (converted to string) | Stable during element lifetime. |
+| Windows | `RuntimeId` from UIA (array of integers) | Stable unless UIA recreates subtree. |
+| Linux | AT-SPI object path (`/org/a11y/atspi/accessible/...`) | Globally unique while object exists. |
+
+The MCP layer maintains a small **ID cache** so repeated queries return the same NodeId
+when possible. If a node disappears, the cache entry expires automatically.
+
+---
+
+## 4. Concurrency and Threading
+
+### MCP Server Threading Model
+
+- The MCP server runs in a **background Tokio task**.
+- Each incoming request is processed asynchronously.
+- Platform backends use an internal mutex or channel to serialize API calls.
+
+### UI Thread Safety
+
+Most accessibility APIs are **thread-safe** for reading,
+but not always for mutations (e.g., actions).
+To ensure safety:
+- All platform API calls are made from a **dedicated worker thread**.
+- The main thread is never blocked by accessibility queries.
+
+A per-request timeout (default: 1 second) ensures long calls don’t hang.
+
+---
+
+## 5. Error Handling
+
+### Error Taxonomy
+
+| Category | Description | Example |
+|-----------|--------------|----------|
+| `NotFound` | Node no longer exists | Node removed before query completed |
+| `PermissionDenied` | Platform denied access | macOS privacy restriction |
+| `Transient` | Temporary backend failure | DBus timeout |
+| `InvalidAction` | Action unsupported for node | Click on static label |
+| `Internal` | Unexpected runtime error | Panic in backend thread |
+
+### Recovery Strategy
+
+- Transient errors are retried once.
+- Permanent errors are returned to the agent as structured MCP errors.
+- If the backend becomes unavailable (e.g., AT-SPI service restart), the server
+  automatically reinitializes its connection.
+
+---
+
+## 6. Dynamic Tree Updates
+
+Tree updates are **not pushed** to the agent initially.
+
+Instead:
+- The agent may re-query nodes at any time.
+- The `get_node` call checks whether the NodeId is still valid.
+- A future version may support a “subscribe to changes” stream using AccessKit’s
+  incremental update model.
+
+For now, **polling** is the expected strategy.
+
+---
+
+## 7. Performance and Scalability
+
+- `query_tree` accepts optional parameters:
+  - `max_depth`: integer
+  - `max_nodes`: integer
+- Large trees are traversed lazily, yielding partial results.
+- Internal pagination is supported through `continuation_token`s.
+
+A full tree traversal is only recommended for debugging or static inspection.
+
+---
+
+## 8. Platform Permission Requirements
+
+| Platform | Expected Behavior | Notes |
+|-----------|------------------|--------|
+| macOS | May prompt user if global accessibility access is required. | Self-inspection is usually allowed without prompt, but behavior varies by OS version. |
+| Windows | UIA access to self is unrestricted. | Cross-process queries require admin privileges. |
+| Linux | AT-SPI access to self always allowed if app registered. | Registration handled by AccessKit or toolkit. |
+
+If permissions fail, the server emits a structured warning but remains running.
+
+---
+
+## 9. Action Semantics and Safety
+
+The `Action` enum is intentionally minimal.
+Actions are validated per node, based on the platform’s supported actions list.
+
+Additional actions may include:
+
+```rust
+pub enum Action {
+    Focus,
+    Press,
+    Increment,
+    Decrement,
+    SetValue(String),
+    Scroll { x: f64, y: f64 },
+    ContextMenu,
+    Custom(String),
+}
+````
+
+Destructive actions (e.g. `SetValue`) are never retried automatically.
+The agent is expected to validate intent before issuing them.
+
+---
+
+## 10. Coordinate Systems
+
+* All coordinates are normalized to **screen coordinates** (origin top-left).
+* Each `Rect` includes a `unit` field indicating whether it’s in pixels or DIP (device-independent pixels).
+* Platform conversions:
+
+  * macOS: Convert from CoreGraphics (bottom-left origin).
+  * Windows: Direct pixels via `BoundingRectangle`.
+  * Linux: From AT-SPI’s extents in screen coordinates.
+
+---
+
+## 11. Testing and Debugging
+
+### Unit Tests
+
+* Mock backends implementing `AccessibilityProvider`.
+* Test tree traversal and action dispatch independently of platform APIs.
+
+### Integration Tests
+
+* Launch sample apps (e.g. Egui demo).
+* Verify the server responds with expected node structure.
+
+### Developer Tools
+
+* Include a CLI utility:
+
+  ```bash
+  cargo run --example dump_tree
+  ```
+
+  This connects to the MCP server and prints a readable tree.
+
+### Debug Logging
+
+Enable via environment variable:
+
+```
+RUST_LOG=accessibility_mcp=debug
+```
+
+---
+
+## 12. Versioning
+
+The MCP protocol includes a top-level version field:
+
+```json
+{ "protocol_version": "1.0" }
+```
+
+* Minor version bumps (1.x) are backward compatible.
+* Major version bumps (2.x) may change schema.
+* The server rejects unknown major versions.
+
+---
+
+## 13. Multi-Window and Multi-Process Support
+
+* The root element returned by `get_root()` may represent either:
+
+  * The top-level “application” element (multiple windows)
+  * A single main window, depending on platform conventions.
+
+To handle multi-window apps:
+
+* `get_root()` returns a synthetic node representing the app.
+* Child nodes correspond to individual top-level windows.
+
+Multi-process support (e.g., Chromium-like architecture) is deferred to future work.
+
+---
+
+## 14. Lifecycle Management
+
+When `McpHandle` is dropped:
+
+* The server shuts down gracefully.
+* All transport connections are closed.
+* Platform backends release native handles (COM uninit, DBus disconnect).
+
+This ensures no background threads linger after the app exits.
+
+---
+
+## 15. Tree Normalization Consistency
+
+The `consumer` layer maps platform roles and properties into
+AccessKit-like roles (`Role::Button`, `Role::TextField`, etc.) using
+lookup tables derived from `accesskit_consumer`.
+
+Ambiguous cases (e.g. macOS “group” vs Windows “pane”) are resolved via a priority rule:
+
+* Prefer semantic match (`Role::Group`).
+* Fall back to generic `Role::Unknown`.
+
+---
+
+## 16. Security Model Extensions
+
+Even within the current process, precautions include:
+
+* **Query throttling:** Maximum 100 requests per second.
+* **Redaction:** Any node marked with role “password” or “secure text field”
+  returns no textual content.
+* **Rate limiting:** Gradual backoff on repeated identical queries.
+
+The server will **never** execute arbitrary code or shell commands
+on behalf of the client.
+
+---
+
+## 17. Integration Testing Reality Check
+
+* **Egui:** Has partial AccessKit integration; sufficient for prototype.
+* **Bevy:** Uses AccessKit through winit, works for core elements.
+* **Other Frameworks:** As long as the OS accessibility tree is populated,
+  the server will function.
+
+Minimum requirement: the app must register itself with the OS accessibility framework.
+
+---
+
+## 18. Outstanding Questions
+
+* Should the MCP server expose a “subscribe to updates” feature?
+* Should NodeId stability be guaranteed across sessions?
+* Is it desirable to expose raw platform-specific metadata for debugging?
+
+These will be decided after initial prototype validation.
+
+---
+
+## Summary
+
+The clarifications above tighten up the architectural design into something
+that can be implemented confidently. The main remaining risks are:
+
+* Platform-specific permission differences (macOS).
+* Handling of extremely large accessibility trees.
+* Ensuring stable NodeId mapping in dynamic UIs.
+
+With these considerations addressed, the project can proceed to a Phase 1 prototype
+on macOS using stdio transport and expand from there.
