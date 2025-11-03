@@ -5,13 +5,22 @@
 //!
 //! Run with: cargo run --example egui_app
 
-use accessibility_mcp::start_mcp_server;
+use accessibility_mcp::{start_mcp_server, Config, TransportKind};
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // Create a Tokio runtime for the MCP server
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let _runtime_guard = runtime.enter();
+
     // Start the MCP server before creating the app
-    // The server runs in a background thread and exposes accessibility info via stdio
-    let _mcp = start_mcp_server(None).expect("Failed to start MCP server");
+    // Use Unix socket for GUI apps so we can communicate while it's running
+    let config = Config {
+        transport: TransportKind::UnixSocket,
+        socket_path: None, // Will use /tmp/accessibility_mcp_<pid>.sock
+        ..Default::default()
+    };
+    let _mcp = start_mcp_server(Some(config)).expect("Failed to start MCP server");
 
     // Create and run the egui app
     let options = eframe::NativeOptions {
@@ -74,8 +83,11 @@ impl eframe::App for DemoApp {
             ui.separator();
 
             ui.collapsing("MCP Protocol Info", |ui| {
-                ui.label("The MCP server is listening on stdio.");
-                ui.label("Send JSON-RPC requests to query the accessibility tree:");
+                let pid = std::process::id();
+                ui.label(format!("The MCP server is listening on Unix socket:"));
+                ui.monospace(format!("/tmp/accessibility_mcp_{}.sock", pid));
+                ui.label("Connect with: nc -U /tmp/accessibility_mcp_<pid>.sock");
+                ui.label("Then send JSON-RPC requests:");
                 ui.monospace(r#"{"protocol_version":"1.0","method":"query_tree"}"#);
             });
         });

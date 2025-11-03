@@ -4,6 +4,7 @@ use crate::platform::{create_provider, AccessibilityProvider};
 use crate::protocol::{ErrorCode, Message, MessageContent, Request, Response, ResponseData};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::oneshot;
@@ -60,6 +61,7 @@ impl From<LogLevel> for tracing::Level {
 pub struct Config {
     pub transport: TransportKind,
     pub port: Option<u16>,
+    pub socket_path: Option<PathBuf>,
     pub normalize: bool,
     pub log_level: LogLevel,
 }
@@ -69,6 +71,7 @@ impl Default for Config {
         Self {
             transport: TransportKind::default(),
             port: None,
+            socket_path: None,
             normalize: false,
             log_level: LogLevel::default(),
         }
@@ -121,7 +124,16 @@ pub fn start_mcp_server(config: Option<Config>) -> Result<McpHandle> {
             eprintln!("[MCP] listening on stdio");
         }
         TransportKind::UnixSocket => {
-            anyhow::bail!("Unix socket transport not yet implemented");
+            let socket_path = config.socket_path.unwrap_or_else(|| {
+                let pid = std::process::id();
+                PathBuf::from(format!("/tmp/accessibility_mcp_{}.sock", pid))
+            });
+            tokio::spawn(run_unix_socket_server(
+                Arc::new(provider),
+                shutdown_rx,
+                socket_path.clone(),
+            ));
+            eprintln!("[MCP] listening on unix socket: {}", socket_path.display());
         }
         TransportKind::Tcp => {
             anyhow::bail!("TCP transport not yet implemented");
@@ -296,5 +308,99 @@ async fn handle_find_by_name(
     // TODO: implement tree traversal and name matching
     Response::Success {
         result: ResponseData::Nodes { nodes: vec![] },
+    }
+}
+
+/// Run the Unix socket-based MCP server
+#[cfg(unix)]
+async fn run_unix_socket_server(
+    provider: Arc<Box<dyn AccessibilityProvider>>,
+    mut shutdown_rx: oneshot::Receiver<()>,
+    socket_path: PathBuf,
+) {
+    use tokio::net::UnixListener;
+
+    // Remove old socket if it exists
+    let _ = std::fs::remove_file(&socket_path);
+
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to bind Unix socket: {}", e);
+            return;
+        }
+    };
+
+    tracing::info!("Unix socket server listening on {}", socket_path.display());
+
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::info!("Unix socket server shutting down");
+                let _ = std::fs::remove_file(&socket_path);
+                break;
+            }
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, _addr)) => {
+                        let provider = Arc::clone(&provider);
+                        tokio::spawn(handle_unix_socket_connection(provider, stream));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to accept connection: {}", e);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn handle_unix_socket_connection(
+    provider: Arc<Box<dyn AccessibilityProvider>>,
+    stream: tokio::net::UnixStream,
+) {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                // EOF - client disconnected
+                break;
+            }
+            Ok(_) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                // Process the request
+                let response = handle_request(&provider, trimmed).await;
+
+                // Send response
+                if let Ok(json) = serde_json::to_string(&response) {
+                    if let Err(e) = writer.write_all(json.as_bytes()).await {
+                        tracing::error!("Failed to write response: {}", e);
+                        break;
+                    }
+                    if let Err(e) = writer.write_all(b"\n").await {
+                        tracing::error!("Failed to write newline: {}", e);
+                        break;
+                    }
+                    if let Err(e) = writer.flush().await {
+                        tracing::error!("Failed to flush: {}", e);
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Error reading from socket: {}", e);
+                break;
+            }
+        }
     }
 }
