@@ -47,22 +47,17 @@ fn app() -> Element {
             // Feature status indicator
             div {
                 style: "margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px;",
-                {
-                    #[cfg(feature = "a11y_mcp")]
-                    rsx! {
-                        p { style: "color: green; font-weight: bold;", "✅ MCP server is ENABLED" }
-                        p { "This app exposes its accessibility tree via MCP protocol." }
-                        p {
-                            style: "font-family: monospace; font-size: 12px;",
-                            "Socket: /tmp/accessibility_mcp_{std::process::id()}.sock"
-                        }
-                    }
 
-                    #[cfg(not(feature = "a11y_mcp"))]
-                    rsx! {
-                        p { style: "color: red; font-weight: bold;", "❌ MCP server is DISABLED" }
-                        p { "Run with --features a11y_mcp to enable accessibility inspection." }
+                if cfg!(feature = "a11y_mcp") {
+                    p { style: "color: green; font-weight: bold;", "✅ MCP server is ENABLED" }
+                    p { "This app exposes its accessibility tree via MCP protocol." }
+                    p {
+                        style: "font-family: monospace; font-size: 12px;",
+                        "Socket: /tmp/accessibility_mcp_{std::process::id()}.sock"
                     }
+                } else {
+                    p { style: "color: red; font-weight: bold;", "❌ MCP server is DISABLED" }
+                    p { "Run with --features a11y_mcp to enable accessibility inspection." }
                 }
             }
 
@@ -154,27 +149,28 @@ fn app() -> Element {
             hr {}
 
             // MCP Protocol Info (only shown when feature is enabled)
-            #[cfg(feature = "a11y_mcp")]
-            details {
-                summary { "MCP Protocol Info" }
-                div {
-                    style: "margin: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px;",
-                    p {
-                        "The MCP server is listening on Unix socket:"
-                    }
-                    p {
-                        style: "font-family: monospace; background: #eee; padding: 5px;",
-                        "/tmp/accessibility_mcp_{std::process::id()}.sock"
-                    }
-                    p { "Connect with:" }
-                    p {
-                        style: "font-family: monospace; background: #eee; padding: 5px;",
-                        "nc -U /tmp/accessibility_mcp_{std::process::id()}.sock"
-                    }
-                    p { "Then send JSON-RPC requests:" }
-                    p {
-                        style: "font-family: monospace; background: #eee; padding: 5px;",
-                        r#"{{"protocol_version":"1.0","method":"query_tree"}}"#
+            if cfg!(feature = "a11y_mcp") {
+                details {
+                    summary { "MCP Protocol Info" }
+                    div {
+                        style: "margin: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px;",
+                        p {
+                            "The MCP server is listening on Unix socket:"
+                        }
+                        p {
+                            style: "font-family: monospace; background: #eee; padding: 5px;",
+                            "/tmp/accessibility_mcp_{std::process::id()}.sock"
+                        }
+                        p { "Connect with:" }
+                        p {
+                            style: "font-family: monospace; background: #eee; padding: 5px;",
+                            "nc -U /tmp/accessibility_mcp_{std::process::id()}.sock"
+                        }
+                        p { "Then send JSON-RPC requests:" }
+                        p {
+                            style: "font-family: monospace; background: #eee; padding: 5px;",
+                            r#"{{"protocol_version":"1.0","method":"query_tree"}}"#
+                        }
                     }
                 }
             }
