@@ -101,11 +101,11 @@ impl Drop for McpHandle {
 pub fn start_mcp_server(config: Option<Config>) -> Result<McpHandle> {
     let config = config.unwrap_or_default();
 
-    // Initialize logging
-    tracing_subscriber::fmt()
+    // Initialize logging (ignore if already initialized)
+    let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::from(config.log_level))
         .with_writer(std::io::stderr)
-        .init();
+        .try_init();
 
     tracing::info!("Starting accessibility MCP server");
 

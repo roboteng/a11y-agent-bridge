@@ -26,6 +26,7 @@ objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSArray"] }
 
 [dev-dependencies]
+tokio-test = "0.4"
 
 [lib]
 name = "accessibility_mcp"
