@@ -123,18 +123,39 @@ impl MacOSProvider {
 
     /// Get children elements from an AX element
     unsafe fn get_children_elements(&self, element: AXUIElementRef) -> Vec<AXUIElementRef> {
+        use core_foundation::array::{CFArray, CFArrayRef};
+        use core_foundation::base::TCFType;
+
         let attr_name = CFString::new(K_AX_CHILDREN_ATTRIBUTE);
         let mut value: CFTypeRef = std::ptr::null();
 
         let result =
             AXUIElementCopyAttributeValue(element, attr_name.as_concrete_TypeRef(), &mut value);
 
-        if result != K_AX_ERROR_SUCCESS || value.is_null() {
+        if result == K_AX_ERROR_NO_VALUE {
+            // No children, which is normal
             return Vec::new();
         }
 
-        // For now, return empty vector - we'll implement proper array handling later
-        Vec::new()
+        if result != K_AX_ERROR_SUCCESS || value.is_null() {
+            tracing::debug!("Failed to get children: error {}", result);
+            return Vec::new();
+        }
+
+        // Cast to CFArray
+        let array_ref = value as CFArrayRef;
+        let array = CFArray::<CFType>::wrap_under_get_rule(array_ref);
+
+        let mut children = Vec::new();
+        for i in 0..array.len() {
+            if let Some(item) = array.get(i) {
+                // The item should be an AXUIElementRef
+                let child_element = item.as_CFTypeRef() as AXUIElementRef;
+                children.push(child_element);
+            }
+        }
+
+        children
     }
 
     /// Convert AXUIElementRef to Node
@@ -217,6 +238,8 @@ impl super::AccessibilityProvider for MacOSProvider {
         let action_name = match action {
             Action::Press => "AXPress",
             Action::Focus => "AXRaise",
+            Action::Increment => "AXIncrement",
+            Action::Decrement => "AXDecrement",
             _ => anyhow::bail!("Action not yet implemented: {:?}", action),
         };
 
