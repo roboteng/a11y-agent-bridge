@@ -27,6 +27,8 @@ objc2-foundation = { version = "0.2", features = ["NSString", "NSArray"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
+eframe = "0.29"
+egui = "0.29"
 
 [lib]
 name = "accessibility_mcp"
