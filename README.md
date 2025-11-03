@@ -144,20 +144,61 @@ This library is designed to be consumed by AI coding agents like Claude Code. Th
 
 ## Configuration
 
+### Stdio Transport (for headless/CLI tools)
+
 ```rust
-use accessibility_mcp::{start_mcp_server, Config, TransportKind, LogLevel};
+use accessibility_mcp::start_mcp_server;
+
+let _mcp = start_mcp_server(None)?;  // Uses stdio by default
+```
+
+### Unix Socket Transport (for GUI apps)
+
+```rust
+use accessibility_mcp::{start_mcp_server, Config, TransportKind};
 
 let config = Config {
-    transport: TransportKind::Stdio,  // or UnixSocket, Tcp
-    port: None,
-    normalize: false,  // normalize to AccessKit model
-    log_level: LogLevel::Info,
+    transport: TransportKind::UnixSocket,
+    socket_path: None,  // Auto-generates /tmp/accessibility_mcp_<PID>.sock
+    ..Default::default()
 };
 
 let _mcp = start_mcp_server(Some(config))?;
 ```
 
 ## Examples
+
+### GUI Application with Unix Socket
+
+Run the egui demo app:
+```bash
+cargo run --example egui_app
+```
+
+The app will display the socket path in the UI. Connect to it:
+```bash
+# Get the PID from the UI or from ps
+echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+```
+
+Example response:
+```json
+{
+  "protocol_version": "1.0",
+  "status": "success",
+  "result": {
+    "nodes": [{
+      "id": "0x6000008d41b0",
+      "role": "AXApplication",
+      "name": "egui_app",
+      "actions": [{"type": "focus"}],
+      "children": []
+    }]
+  }
+}
+```
+
+### Minimal Server (stdio)
 
 Run the minimal server:
 ```bash
@@ -171,11 +212,12 @@ echo '{"protocol_version":"1.0","method":"query_tree"}' | cargo run --example mi
 
 ## Current Limitations
 
-- Children enumeration not fully implemented
+- Children enumeration not fully implemented (returns empty array)
 - Bounds/coordinates not extracted yet
 - Limited action support (Focus, Press only)
 - `find_by_name` not implemented
-- macOS only
+- macOS only (Windows and Linux planned)
+- Requires accessibility permissions on macOS
 
 ## Architecture
 
