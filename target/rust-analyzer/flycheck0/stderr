@@ -1,5 +1,32 @@
-   0.602754454s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="simple_server"}: cargo::core::compiler::fingerprint: fingerprint error for accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp)/Check { test: false }/TargetInner { kind: "example", name: "simple_server", tested: false, benched: false, ..: with_path("/Users/tws/develop/accessibility_mcp/examples/simple_server.rs", Edition2021) }
-   0.602818467s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="simple_server"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/tws/.cargo/target/debug/.fingerprint/accessibility_mcp-0adf47e28989df35/example-simple_server`
+    Blocking waiting for file lock on build directory
+   1.860502740s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="integration_test"}: cargo::core::compiler::fingerprint: fingerprint error for accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp)/Check { test: true }/TargetInner { kind: "test", name: "integration_test", benched: false, ..: with_path("/Users/tws/develop/accessibility_mcp/tests/integration_test.rs", Edition2021) }
+   1.860563490s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="integration_test"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/tws/.cargo/target/debug/.fingerprint/accessibility_mcp-903a688b988c620d/test-integration-test-integration_test`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: std::backtrace::Backtrace::create
+   1: std::backtrace::Backtrace::capture
+   2: cargo_util::paths::read_bytes
+   3: cargo_util::paths::read
+   4: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   5: cargo::core::compiler::fingerprint::prepare_target
+   6: cargo::core::compiler::compile
+   7: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   8: cargo::ops::cargo_compile::compile_ws
+   9: cargo::ops::cargo_compile::compile_with_exec
+  10: cargo::ops::cargo_compile::compile
+  11: cargo::commands::check::exec
+  12: <cargo::cli::Exec>::exec
+  13: cargo::main
+  14: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  15: std::rt::lang_start::<()>::{closure#0}
+  16: std::rt::lang_start_internal
+  17: _main
+  18: <unknown>
+   1.881986175s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="minimal_server"}: cargo::core::compiler::fingerprint: fingerprint error for accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp)/Check { test: false }/TargetInner { kind: "example", name: "minimal_server", tested: false, benched: false, ..: with_path("/Users/tws/develop/accessibility_mcp/examples/minimal_server.rs", Edition2021) }
+   1.882010578s  INFO prepare_target{force=false package_id=accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp) target="minimal_server"}: cargo::core::compiler::fingerprint:     err: failed to read `/Users/tws/.cargo/target/debug/.fingerprint/accessibility_mcp-cbe5b82106cd130f/example-minimal_server`
 
 Caused by:
     No such file or directory (os error 2)
@@ -25,4 +52,4 @@ Stack backtrace:
   17: _main
   18: <unknown>
     Checking accessibility_mcp v0.1.0 (/Users/tws/develop/accessibility_mcp)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.26s
+error: could not compile `accessibility_mcp` (test "integration_test") due to 4 previous errors; 1 warning emitted
