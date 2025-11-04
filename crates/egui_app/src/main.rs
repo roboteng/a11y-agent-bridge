@@ -56,6 +56,10 @@ struct DemoApp {
 
 impl eframe::App for DemoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Force AccessKit to initialize immediately (not lazy)
+        #[cfg(feature = "a11y_mcp")]
+        ctx.enable_accesskit();
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Accessibility MCP Server Demo");
 
