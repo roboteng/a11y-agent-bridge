@@ -242,6 +242,11 @@ async fn handle_request(provider: &Arc<Box<dyn AccessibilityProvider>>, line: &s
             handle_perform_action(provider, &node_id, &action).await
         }
         Request::FindByName { name } => handle_find_by_name(provider, &name).await,
+        Request::Initialize {
+            protocol_version,
+            capabilities,
+        } => handle_initialize(protocol_version, capabilities).await,
+        Request::ToolsList => handle_tools_list().await,
     };
 
     Message::response(response)
@@ -301,13 +306,177 @@ async fn handle_perform_action(
 }
 
 async fn handle_find_by_name(
-    _provider: &Arc<Box<dyn AccessibilityProvider>>,
-    _name: &str,
+    provider: &Arc<Box<dyn AccessibilityProvider>>,
+    name: &str,
 ) -> Response {
-    // For now, just return empty list
-    // TODO: implement tree traversal and name matching
+    // Get the root node and traverse the tree
+    let root = match provider.get_root() {
+        Ok(r) => r,
+        Err(e) => {
+            return Response::Error {
+                error: crate::protocol::ErrorInfo {
+                    code: ErrorCode::Internal,
+                    message: format!("Failed to get root: {}", e),
+                },
+            }
+        }
+    };
+
+    // Perform breadth-first search to find matching nodes
+    let mut matches = Vec::new();
+    let mut to_visit = vec![root];
+    let mut visited = std::collections::HashSet::new();
+
+    // Limit search to prevent infinite loops
+    const MAX_NODES: usize = 1000;
+    let mut nodes_checked = 0;
+
+    while let Some(node) = to_visit.pop() {
+        if nodes_checked >= MAX_NODES {
+            tracing::warn!("find_by_name: hit max nodes limit of {}", MAX_NODES);
+            break;
+        }
+        nodes_checked += 1;
+
+        // Skip if already visited (prevent cycles)
+        if !visited.insert(node.id.clone()) {
+            continue;
+        }
+
+        // Check if this node matches (case-insensitive substring match)
+        if let Some(node_name) = &node.name {
+            if node_name.to_lowercase().contains(&name.to_lowercase()) {
+                matches.push(node.clone());
+            }
+        }
+
+        // Add children to the queue
+        for child_id in &node.children {
+            match provider.get_node(child_id) {
+                Ok(child) => to_visit.push(child),
+                Err(e) => {
+                    tracing::debug!("Failed to get child node {:?}: {}", child_id, e);
+                    // Continue with other children
+                }
+            }
+        }
+    }
+
     Response::Success {
-        result: ResponseData::Nodes { nodes: vec![] },
+        result: ResponseData::Nodes { nodes: matches },
+    }
+}
+
+async fn handle_initialize(
+    protocol_version: Option<String>,
+    _capabilities: Option<serde_json::Value>,
+) -> Response {
+    // Validate protocol version if provided
+    if let Some(version) = protocol_version {
+        if !version.starts_with("1.") {
+            return Response::Error {
+                error: crate::protocol::ErrorInfo {
+                    code: ErrorCode::Internal,
+                    message: format!("Unsupported protocol version: {}", version),
+                },
+            };
+        }
+    }
+
+    Response::Success {
+        result: ResponseData::Initialize {
+            protocol_version: Message::PROTOCOL_VERSION.to_string(),
+            capabilities: crate::protocol::Capabilities {
+                tools: Some(crate::protocol::ToolsCapability {
+                    list_changed: false,
+                }),
+            },
+            server_info: crate::protocol::ServerInfo {
+                name: "accessibility_mcp".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+        },
+    }
+}
+
+async fn handle_tools_list() -> Response {
+    use crate::protocol::Tool;
+
+    let tools = vec![
+        Tool {
+            name: "query_tree".to_string(),
+            description: "Query the accessibility tree starting from the root node".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum depth to traverse (optional)"
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum number of nodes to return (optional)"
+                    }
+                }
+            }),
+        },
+        Tool {
+            name: "get_node".to_string(),
+            description: "Get details for a specific accessibility node by ID".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "node_id": {
+                        "type": "string",
+                        "description": "The unique identifier of the node"
+                    }
+                },
+                "required": ["node_id"]
+            }),
+        },
+        Tool {
+            name: "perform_action".to_string(),
+            description: "Perform an accessibility action on a node".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "node_id": {
+                        "type": "string",
+                        "description": "The unique identifier of the node"
+                    },
+                    "action": {
+                        "type": "object",
+                        "description": "The action to perform",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": ["focus", "press", "increment", "decrement", "set_value", "scroll", "context_menu", "custom"]
+                            }
+                        },
+                        "required": ["type"]
+                    }
+                },
+                "required": ["node_id", "action"]
+            }),
+        },
+        Tool {
+            name: "find_by_name".to_string(),
+            description: "Find accessibility nodes by name (substring match)".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The name or partial name to search for"
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+    ];
+
+    Response::Success {
+        result: ResponseData::Tools { tools },
     }
 }
 

@@ -1,17 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/accessibility_mcp",
-    "crates/egui_app",
-    "crates/dioxus_app",
+    "crates/*",
 ]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Accessibility MCP Contributors"]
 
 [workspace.dependencies]
 accessibility_mcp = { path = "crates/accessibility_mcp" }
-tokio = { version = "1.40", features = ["rt", "rt-multi-thread", "sync", "time", "io-std", "io-util", "macros", "net"] }
+tokio = { version = "1.40", features = ["rt", "sync", "time", "io-std", "io-util", "macros", "net"] }
 anyhow = "1.0"

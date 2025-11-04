@@ -80,6 +80,16 @@ pub struct Node {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum Request {
+    /// Initialize the MCP connection and negotiate capabilities
+    Initialize {
+        #[serde(default)]
+        protocol_version: Option<String>,
+        #[serde(default)]
+        capabilities: Option<serde_json::Value>,
+    },
+    /// List available tools (MCP standard)
+    #[serde(rename = "tools/list")]
+    ToolsList,
     /// Query the accessibility tree
     QueryTree {
         #[serde(default)]
@@ -106,10 +116,53 @@ pub enum Response {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ResponseData {
-    Tree { nodes: Vec<Node> },
-    Node { node: Node },
-    ActionResult { success: bool },
-    Nodes { nodes: Vec<Node> },
+    Initialize {
+        protocol_version: String,
+        capabilities: Capabilities,
+        server_info: ServerInfo,
+    },
+    Tools {
+        tools: Vec<Tool>,
+    },
+    Tree {
+        nodes: Vec<Node>,
+    },
+    Node {
+        node: Node,
+    },
+    ActionResult {
+        success: bool,
+    },
+    Nodes {
+        nodes: Vec<Node>,
+    },
+}
+
+/// Server capabilities
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub tools: Option<ToolsCapability>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolsCapability {
+    #[serde(default)]
+    pub list_changed: bool,
+}
+
+/// Server information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInfo {
+    pub name: String,
+    pub version: String,
+}
+
+/// Tool definition for MCP tools/list
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
