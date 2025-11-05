@@ -3,80 +3,10 @@
 use crate::platform::{create_provider, AccessibilityProvider};
 use crate::protocol::{ErrorCode, Message, MessageContent, Request, Response, ResponseData};
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::oneshot;
-
-/// Transport mechanism for the MCP server
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TransportKind {
-    /// Standard input/output (default)
-    Stdio,
-    /// Unix domain socket
-    UnixSocket,
-    /// TCP socket
-    Tcp,
-}
-
-impl Default for TransportKind {
-    fn default() -> Self {
-        Self::Stdio
-    }
-}
-
-/// Logging level
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LogLevel {
-    Error,
-    Warn,
-    Info,
-    Debug,
-    Trace,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        Self::Info
-    }
-}
-
-impl From<LogLevel> for tracing::Level {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Error => tracing::Level::ERROR,
-            LogLevel::Warn => tracing::Level::WARN,
-            LogLevel::Info => tracing::Level::INFO,
-            LogLevel::Debug => tracing::Level::DEBUG,
-            LogLevel::Trace => tracing::Level::TRACE,
-        }
-    }
-}
-
-/// Configuration for the MCP server
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub transport: TransportKind,
-    pub port: Option<u16>,
-    pub socket_path: Option<PathBuf>,
-    pub normalize: bool,
-    pub log_level: LogLevel,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            transport: TransportKind::default(),
-            port: None,
-            socket_path: None,
-            normalize: false,
-            log_level: LogLevel::default(),
-        }
-    }
-}
 
 /// Handle for controlling the MCP server
 pub struct McpHandle {
@@ -100,13 +30,14 @@ impl Drop for McpHandle {
     }
 }
 
-/// Start the MCP server
-pub fn start_mcp_server(config: Option<Config>) -> Result<McpHandle> {
-    let config = config.unwrap_or_default();
-
+/// Start the MCP server on a Unix socket
+///
+/// The server will listen on `/tmp/accessibility_mcp_{PID}.sock`
+/// where PID is the process ID of the calling application.
+pub fn start_mcp_server() -> Result<McpHandle> {
     // Initialize logging (ignore if already initialized)
     let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::from(config.log_level))
+        .with_max_level(tracing::Level::INFO)
         .with_writer(std::io::stderr)
         .try_init();
 
@@ -117,92 +48,23 @@ pub fn start_mcp_server(config: Option<Config>) -> Result<McpHandle> {
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    // Spawn the server task
-    match config.transport {
-        TransportKind::Stdio => {
-            tokio::spawn(run_stdio_server(Arc::new(provider), shutdown_rx));
-            eprintln!("[MCP] listening on stdio");
-        }
-        TransportKind::UnixSocket => {
-            let socket_path = config.socket_path.unwrap_or_else(|| {
-                let pid = std::process::id();
-                PathBuf::from(format!("/tmp/accessibility_mcp_{}.sock", pid))
-            });
-            tokio::spawn(run_unix_socket_server(
-                Arc::new(provider),
-                shutdown_rx,
-                socket_path.clone(),
-            ));
-            eprintln!("[MCP] listening on unix socket: {}", socket_path.display());
-        }
-        TransportKind::Tcp => {
-            anyhow::bail!("TCP transport not yet implemented");
-        }
-    }
+    // Generate socket path based on PID
+    let pid = std::process::id();
+    let socket_path = PathBuf::from(format!("/tmp/accessibility_mcp_{}.sock", pid));
+
+    // Spawn the Unix socket server
+    tokio::spawn(run_unix_socket_server(
+        Arc::new(provider),
+        shutdown_rx,
+        socket_path.clone(),
+    ));
+
+    tracing::info!("Unix socket server listening on {}", socket_path.display());
+    eprintln!("[MCP] listening on unix socket: {}", socket_path.display());
 
     Ok(McpHandle {
         shutdown_tx: Some(shutdown_tx),
     })
-}
-
-/// Run the stdio-based MCP server
-async fn run_stdio_server(
-    provider: Arc<Box<dyn AccessibilityProvider>>,
-    mut shutdown_rx: oneshot::Receiver<()>,
-) {
-    let stdin = tokio::io::stdin();
-    let mut stdout = tokio::io::stdout();
-    let mut reader = BufReader::new(stdin);
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-
-        tokio::select! {
-            _ = &mut shutdown_rx => {
-                tracing::info!("Server shutting down");
-                break;
-            }
-            result = reader.read_line(&mut line) => {
-                match result {
-                    Ok(0) => {
-                        // EOF
-                        tracing::info!("Stdin closed, shutting down");
-                        break;
-                    }
-                    Ok(_) => {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-
-                        // Process the request
-                        let response = handle_request(&provider, trimmed).await;
-
-                        // Send response
-                        if let Ok(json) = serde_json::to_string(&response) {
-                            if let Err(e) = stdout.write_all(json.as_bytes()).await {
-                                tracing::error!("Failed to write response: {}", e);
-                                break;
-                            }
-                            if let Err(e) = stdout.write_all(b"\n").await {
-                                tracing::error!("Failed to write newline: {}", e);
-                                break;
-                            }
-                            if let Err(e) = stdout.flush().await {
-                                tracing::error!("Failed to flush stdout: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Error reading from stdin: {}", e);
-                        break;
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Handle a single MCP request

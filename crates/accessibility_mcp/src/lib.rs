@@ -6,10 +6,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use accessibility_mcp::{start_mcp_server, Config};
+//! use accessibility_mcp::start_mcp_server;
 //!
 //! fn main() -> anyhow::Result<()> {
-//!     let _mcp = start_mcp_server(None)?;
+//!     // Starts server on /tmp/accessibility_mcp_{PID}.sock
+//!     let _mcp = start_mcp_server()?;
 //!     // Your app runs here...
 //!     Ok(())
 //! }
@@ -20,7 +21,7 @@ pub mod protocol;
 mod server;
 
 pub use protocol::{Action, Node, NodeId, Rect};
-pub use server::{start_mcp_server, Config, LogLevel, McpHandle, TransportKind};
+pub use server::{start_mcp_server, McpHandle};
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +48,7 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "macos")]
     async fn can_start_mcp_server() {
-        let handle = start_mcp_server(None).expect("Should be able to start MCP server");
+        let handle = start_mcp_server().expect("Should be able to start MCP server");
         handle.shutdown();
     }
 

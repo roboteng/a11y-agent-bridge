@@ -66,7 +66,7 @@ accessibility tree and actions, using the same interfaces as real assistive tech
               v
 +---------------------------+
 | MCP Server                |
-|  (JSON-RPC over stdio)    |
+|  (JSON-RPC over socket)   |
 +-------------+-------------+
               |
               | Commands / responses
@@ -109,22 +109,13 @@ accessibility_mcp/
 /// for the current process.
 ///
 /// This function spawns a background task that listens for
-/// MCP requests over stdio or a local socket.
+/// MCP requests over a Unix domain socket at /tmp/accessibility_mcp_{PID}.sock
 ///
 /// Returns a handle that can be used to stop the server.
-pub fn start_mcp_server(config: Option<Config>) -> anyhow::Result<McpHandle>;
+pub fn start_mcp_server() -> anyhow::Result<McpHandle>;
 ```
 
-#### `Config`
-
-```rust
-pub struct Config {
-    pub transport: TransportKind, // e.g., stdio, unix socket, tcp
-    pub port: Option<u16>,         // used if TransportKind::Tcp
-    pub normalize: bool,           // whether to normalize via AccessKit model
-    pub log_level: LogLevel,
-}
-```
+The socket path is automatically generated based on the process ID.
 
 #### `McpHandle`
 
@@ -354,19 +345,14 @@ should suffice.
 
 | Transport | Use Case | Notes |
 |------------|-----------|-------|
-| **stdio** | Default. Suitable when the agent launches the app as a subprocess. | Simple, robust, no configuration needed. |
-| **unix socket / named pipe** | Useful for IDEs or local tools that need to connect to a running app. | Path or name is logged on startup. |
-| **TCP** | Optional, for distributed testing. | Should be disabled in production. |
+| **unix socket** | Default and only transport. Suitable for all use cases. | Path is auto-generated or configurable. Logged on startup. |
 
 ### Discovery
 
 By default, the server prints its transport details to stderr in a structured form:
 
 ```
-
-[MCP] listening on stdio
-[MCP] listening on unix socket at /tmp/accessibility_mcp_<pid>.sock
-
+[MCP] listening on unix socket: /tmp/accessibility_mcp_<pid>.sock
 ````
 
 Agents can discover or attach using these details.
@@ -641,4 +627,4 @@ that can be implemented confidently. The main remaining risks are:
 * Ensuring stable NodeId mapping in dynamic UIs.
 
 With these considerations addressed, the project can proceed to a Phase 1 prototype
-on macOS using stdio transport and expand from there.
+on macOS using Unix socket transport and expand from there.

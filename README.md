@@ -19,8 +19,8 @@ Coding agents can inspect and interact with native application UIs through the s
 use accessibility_mcp::start_mcp_server;
 
 fn main() -> anyhow::Result<()> {
-    // Start the MCP server
-    let _mcp = start_mcp_server(None)?;
+    // Start the MCP server on /tmp/accessibility_mcp_{PID}.sock
+    let _mcp = start_mcp_server()?;
     
     // Your app runs here...
     Ok(())
@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
 
 ### Communicating with the Server
 
-The server uses JSON-RPC over stdio by default. Send requests as JSON lines:
+The server uses JSON-RPC over a Unix domain socket. Send requests as JSON lines:
 
 **Request:**
 ```json
@@ -168,28 +168,18 @@ echo '{"protocol_version":"1.0","method":"perform_action","node_id":"<button_id>
 
 This enables automated UI testing, accessibility verification, and remote control of applications!
 
-## Configuration
+## Socket Path
 
-### Stdio Transport (for headless/CLI tools)
+The server always listens on a Unix domain socket at:
 
-```rust
-use accessibility_mcp::start_mcp_server;
-
-let _mcp = start_mcp_server(None)?;  // Uses stdio by default
+```
+/tmp/accessibility_mcp_{PID}.sock
 ```
 
-### Unix Socket Transport (for GUI apps)
+Where `{PID}` is the process ID of your application. This path is automatically logged to stderr when the server starts:
 
-```rust
-use accessibility_mcp::{start_mcp_server, Config, TransportKind};
-
-let config = Config {
-    transport: TransportKind::UnixSocket,
-    socket_path: None,  // Auto-generates /tmp/accessibility_mcp_<PID>.sock
-    ..Default::default()
-};
-
-let _mcp = start_mcp_server(Some(config))?;
+```
+[MCP] listening on unix socket: /tmp/accessibility_mcp_12345.sock
 ```
 
 ## Examples
@@ -260,14 +250,11 @@ echo '{"protocol_version":"1.0","method":"perform_action","node_id":"0x123abc","
 The `accessibility_mcp` library crate includes additional examples:
 
 ```bash
-# Minimal server (stdio)
-cargo run -p accessibility_mcp --example minimal_server
+# Simple server
+cargo run -p accessibility_mcp --example simple_server
 
 # Test provider directly
 cargo run -p accessibility_mcp --example test_provider
-
-# Simple server
-cargo run -p accessibility_mcp --example simple_server
 ```
 
 ## Current Limitations
@@ -283,8 +270,7 @@ cargo run -p accessibility_mcp --example simple_server
 
 - ✅ Full accessibility tree traversal with children enumeration
 - ✅ Actions: `focus`, `press`, `increment`, `decrement`
-- ✅ Unix socket transport for GUI applications
-- ✅ Stdio transport for CLI tools
+- ✅ Unix socket transport
 - ✅ Finding UI elements by traversing the tree
 - ✅ Performing actions on buttons, sliders, and other controls
 - ✅ Successfully tested with egui applications

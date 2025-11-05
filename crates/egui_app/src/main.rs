@@ -17,15 +17,8 @@ fn main() -> eframe::Result {
         let _runtime_guard = runtime.enter();
 
         // Start the MCP server before creating the app
-        // Use Unix socket for GUI apps so we can communicate while it's running
-        let config = accessibility_mcp::Config {
-            transport: accessibility_mcp::TransportKind::UnixSocket,
-            socket_path: None, // Will use /tmp/accessibility_mcp_<pid>.sock
-            ..Default::default()
-        };
-
-        let handle =
-            accessibility_mcp::start_mcp_server(Some(config)).expect("Failed to start MCP server");
+        // Listens on /tmp/accessibility_mcp_{PID}.sock
+        let handle = accessibility_mcp::start_mcp_server().expect("Failed to start MCP server");
 
         // Keep the runtime alive
         (runtime, handle)

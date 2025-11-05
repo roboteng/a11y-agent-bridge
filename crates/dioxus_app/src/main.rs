@@ -15,13 +15,8 @@ fn main() {
     // Dioxus already has a Tokio runtime, so we don't need to create one!
     #[cfg(feature = "a11y_mcp")]
     let _mcp = {
-        let config = accessibility_mcp::Config {
-            transport: accessibility_mcp::TransportKind::UnixSocket,
-            socket_path: None, // Will use /tmp/accessibility_mcp_<pid>.sock
-            ..Default::default()
-        };
-
-        accessibility_mcp::start_mcp_server(Some(config)).expect("Failed to start MCP server")
+        // Listens on /tmp/accessibility_mcp_{PID}.sock
+        accessibility_mcp::start_mcp_server().expect("Failed to start MCP server")
     };
 
     // Launch the Dioxus app
