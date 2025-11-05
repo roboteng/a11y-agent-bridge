@@ -1,13 +1,12 @@
 //! Integration tests for MCP server protocol communication
 
-use accessibility_mcp::{start_mcp_server, Config, LogLevel, TransportKind};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-#[test]
+#[tokio::test]
 #[cfg(target_os = "macos")]
-fn test_mcp_protocol_communication() {
+async fn test_mcp_protocol_communication() {
     // This test spawns the simple_server example as a subprocess
     // and verifies we can send requests and receive responses
 
@@ -24,7 +23,7 @@ fn test_mcp_protocol_communication() {
     let mut reader = BufReader::new(stdout);
 
     // Give the server a moment to start
-    std::thread::sleep(Duration::from_millis(500));
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Send a query_tree request
     let request = r#"{"protocol_version":"1.0","method":"query_tree"}"#;

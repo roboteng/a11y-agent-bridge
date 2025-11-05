@@ -22,29 +22,29 @@ Ensures that AccessKit is initialized immediately (via `ctx.enable_accesskit()`)
 These tests are marked with `#[ignore]` because they:
 - Start a GUI application
 - Take several seconds to run
-- Should run sequentially (not in parallel)
+- Use `#[serial]` to run sequentially (avoiding socket conflicts)
 
 ### Run all AccessKit tests:
 ```bash
-cargo test -p egui_app --features a11y_mcp -- --ignored --test-threads=1
+cargo test -p egui_app --features a11y_mcp -- --ignored
 ```
 
 ### Run a specific test:
 ```bash
-cargo test -p egui_app --features a11y_mcp -- --ignored --test-threads=1 test_accesskit_exposes_widgets
+cargo test -p egui_app --features a11y_mcp -- --ignored test_accesskit_exposes_widgets
 ```
 
 ### Include in CI:
 ```bash
 # On macOS CI runners only
-cargo test -p egui_app --features a11y_mcp -- --ignored --test-threads=1
+cargo test -p egui_app --features a11y_mcp -- --ignored
 ```
 
 ## Requirements
 
 - **macOS only**: These tests use the macOS Accessibility API
 - **Feature flag**: Must run with `--features a11y_mcp`
-- **Sequential execution**: Must use `--test-threads=1` to avoid port/socket conflicts
+- **Sequential execution**: Tests use `#[serial]` attribute to avoid socket conflicts
 - **GUI environment**: Requires a display (may fail in headless CI)
 
 ## What Gets Tested

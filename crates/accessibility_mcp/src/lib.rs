@@ -44,25 +44,11 @@ mod tests {
         assert_eq!(node.actions.len(), 1);
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(target_os = "macos")]
-    fn can_start_mcp_server() {
-        // We need a tokio runtime since the server spawns async tasks
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-
-        runtime.block_on(async {
-            // Starting the server should succeed
-            let handle = start_mcp_server(None);
-            assert!(handle.is_ok(), "Should be able to start MCP server");
-
-            // Clean shutdown - the handle should drop cleanly
-            if let Ok(h) = handle {
-                h.shutdown();
-            }
-
-            // Give the background task a moment to shut down
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        });
+    async fn can_start_mcp_server() {
+        let handle = start_mcp_server(None).expect("Should be able to start MCP server");
+        handle.shutdown();
     }
 
     #[test]

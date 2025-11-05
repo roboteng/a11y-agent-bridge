@@ -6,11 +6,12 @@
 #[cfg(all(test, target_os = "macos", feature = "a11y_mcp"))]
 mod accesskit_tests {
     use serde_json::json;
+    use serial_test::serial;
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
     use std::process::{Child, Command};
-    use std::thread;
     use std::time::Duration;
+    use tokio::time::sleep;
 
     /// Helper struct to manage the egui app process and cleanup
     struct TestApp {
@@ -19,7 +20,7 @@ mod accesskit_tests {
     }
 
     impl TestApp {
-        fn start() -> Self {
+        async fn start() -> Self {
             // Build the egui_app binary
             let status = Command::new("cargo")
                 .args(&["build", "-p", "egui_app", "--features", "a11y_mcp"])
@@ -35,7 +36,7 @@ mod accesskit_tests {
                 .expect("Failed to start egui_app");
 
             // Wait a bit for the app to start and create the socket
-            thread::sleep(Duration::from_secs(5));
+            sleep(Duration::from_secs(5)).await;
 
             // Find the socket file
             let pid = process.id();
@@ -44,7 +45,7 @@ mod accesskit_tests {
             // Verify socket exists
             let mut retries = 0;
             while !std::path::Path::new(&socket_path).exists() && retries < 10 {
-                thread::sleep(Duration::from_millis(500));
+                sleep(Duration::from_millis(500)).await;
                 retries += 1;
             }
 
@@ -84,13 +85,17 @@ mod accesskit_tests {
             // Clean up: kill the process
             let _ = self.process.kill();
             let _ = self.process.wait();
+
+            // Give the system time to clean up the socket and release resources
+            std::thread::sleep(Duration::from_millis(500));
         }
     }
 
-    #[test]
-    #[ignore] // Run with: cargo test -- --ignored --test-threads=1
-    fn test_accesskit_exposes_widgets() {
-        let app = TestApp::start();
+    #[tokio::test]
+    #[ignore] // Run with: cargo test -- --ignored
+    #[serial]
+    async fn test_accesskit_exposes_widgets() {
+        let app = TestApp::start().await;
 
         // Test 1: Query the accessibility tree
         let query_request = json!({
@@ -146,10 +151,11 @@ mod accesskit_tests {
         );
     }
 
-    #[test]
-    #[ignore] // Run with: cargo test -- --ignored --test-threads=1
-    fn test_slider_is_accessible_and_interactive() {
-        let app = TestApp::start();
+    #[tokio::test]
+    #[ignore] // Run with: cargo test -- --ignored
+    #[serial]
+    async fn test_slider_is_accessible_and_interactive() {
+        let app = TestApp::start().await;
 
         // Find all nodes
         let find_request = json!({
@@ -260,14 +266,19 @@ mod accesskit_tests {
         println!("✅ Slider is accessible and interactive via MCP protocol");
     }
 
-    #[test]
-    #[ignore] // Run with: cargo test -- --ignored --test-threads=1
-    fn test_accesskit_lazy_init_is_disabled() {
+    #[tokio::test]
+    #[ignore] // Run with: cargo test -- --ignored
+    #[serial]
+    async fn test_accesskit_lazy_init_is_disabled() {
         // This test ensures that AccessKit is initialized immediately,
         // not lazily. If AccessKit were lazy, we wouldn't see any widgets
         // until a "real" accessibility client (like VoiceOver) connected.
 
-        let app = TestApp::start();
+        let app = TestApp::start().await;
+
+        // Give AccessKit a moment to build the initial tree
+        // (it's not truly "immediate", but should be within a couple seconds)
+        sleep(Duration::from_secs(2)).await;
 
         // Immediately after startup, we should be able to find widgets
         // without needing VoiceOver or other accessibility clients running
