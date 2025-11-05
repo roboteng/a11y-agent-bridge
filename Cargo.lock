@@ -1830,6 +1830,7 @@ dependencies = [
  "accessibility_mcp",
  "eframe",
  "egui",
+ "serde_json",
  "tokio",
 ]
 
