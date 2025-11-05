@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 /// Handle for controlling the MCP server
@@ -28,6 +29,19 @@ impl Drop for McpHandle {
             let _ = tx.send(());
         }
     }
+}
+
+pub fn start_all() -> Result<(Runtime, McpHandle)> {
+    // Create a Tokio runtime for the MCP server
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let _runtime_guard = runtime.enter();
+
+    // Start the MCP server before creating the app
+    // Listens on /tmp/accessibility_mcp_{PID}.sock
+    let handle = start_mcp_server().expect("Failed to start MCP server");
+
+    // Keep the runtime alive
+    Ok((runtime, handle))
 }
 
 /// Start the MCP server on a Unix socket

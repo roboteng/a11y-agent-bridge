@@ -111,8 +111,20 @@ accessibility_mcp/
 /// This function spawns a background task that listens for
 /// MCP requests over a Unix domain socket at /tmp/accessibility_mcp_{PID}.sock
 ///
+/// Note: Requires an existing Tokio runtime. For applications without Tokio,
+/// use `start_all()` instead which creates the runtime for you.
+///
 /// Returns a handle that can be used to stop the server.
 pub fn start_mcp_server() -> anyhow::Result<McpHandle>;
+
+/// Convenience function that creates a Tokio runtime and starts the MCP server.
+///
+/// This is the recommended function for applications that don't already have
+/// a Tokio runtime (e.g., egui applications). For applications that already
+/// use Tokio (e.g., Dioxus), use `start_mcp_server()` directly.
+///
+/// Returns both the runtime (which must be kept alive) and the server handle.
+pub fn start_all() -> anyhow::Result<(tokio::runtime::Runtime, McpHandle)>;
 ```
 
 The socket path is automatically generated based on the process ID.

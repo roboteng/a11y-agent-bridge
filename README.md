@@ -15,6 +15,22 @@ Coding agents can inspect and interact with native application UIs through the s
 
 ### In Your Application
 
+**For applications without Tokio runtime (e.g., egui):**
+
+```rust
+use accessibility_mcp::start_all;
+
+fn main() -> anyhow::Result<()> {
+    // Starts Tokio runtime and MCP server on /tmp/accessibility_mcp_{PID}.sock
+    let _mcp = start_all()?;
+    
+    // Your app runs here...
+    Ok(())
+}
+```
+
+**For applications that already have Tokio runtime (e.g., Dioxus):**
+
 ```rust
 use accessibility_mcp::start_mcp_server;
 
@@ -188,9 +204,9 @@ Where `{PID}` is the process ID of your application. This path is automatically 
 
 We provide two demo applications showcasing different integration patterns:
 
-#### Dioxus App (Recommended - Seamless Integration)
+#### Dioxus App (Uses `start_mcp_server`)
 
-Dioxus ships with Tokio, so integration is clean and simple:
+Dioxus ships with Tokio, so it uses `start_mcp_server()` directly:
 
 **Without MCP server** (production mode):
 ```bash
@@ -202,9 +218,14 @@ cargo run -p dioxus_app
 cargo run -p dioxus_app --features a11y_mcp
 ```
 
-#### Egui App (Manual Runtime Pattern)
+The code simply calls:
+```rust
+let _mcp = accessibility_mcp::start_mcp_server()?;
+```
 
-Egui doesn't use Tokio, demonstrating the pattern for non-async frameworks:
+#### Egui App (Uses `start_all`)
+
+Egui doesn't have Tokio, so it uses `start_all()` which creates the runtime:
 
 **Without MCP server**:
 ```bash
@@ -214,6 +235,11 @@ cargo run -p egui_app
 **With MCP server**:
 ```bash
 cargo run -p egui_app --features a11y_mcp
+```
+
+The code simply calls:
+```rust
+let _mcp = accessibility_mcp::start_all()?;
 ```
 
 When the `a11y_mcp` feature is enabled, the app will display the socket path in the UI. Connect to it:

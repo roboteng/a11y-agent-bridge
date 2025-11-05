@@ -6,11 +6,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use accessibility_mcp::start_mcp_server;
+//! use accessibility_mcp::start_all;
 //!
 //! fn main() -> anyhow::Result<()> {
 //!     // Starts server on /tmp/accessibility_mcp_{PID}.sock
-//!     let _mcp = start_mcp_server()?;
+//!     let _mcp = start_all()?;
 //!     // Your app runs here...
 //!     Ok(())
 //! }
@@ -21,7 +21,7 @@ pub mod protocol;
 mod server;
 
 pub use protocol::{Action, Node, NodeId, Rect};
-pub use server::{start_mcp_server, McpHandle};
+pub use server::{start_all, start_mcp_server, McpHandle};
 
 #[cfg(test)]
 mod tests {

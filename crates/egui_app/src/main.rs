@@ -11,18 +11,7 @@ use eframe::egui;
 fn main() -> eframe::Result {
     // Conditionally start the MCP server if feature is enabled
     #[cfg(feature = "a11y_mcp")]
-    let _mcp = {
-        // Create a Tokio runtime for the MCP server
-        let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-        let _runtime_guard = runtime.enter();
-
-        // Start the MCP server before creating the app
-        // Listens on /tmp/accessibility_mcp_{PID}.sock
-        let handle = accessibility_mcp::start_mcp_server().expect("Failed to start MCP server");
-
-        // Keep the runtime alive
-        (runtime, handle)
-    };
+    let _mcp = accessibility_mcp::start_all().expect("Failed to start MCP server");
 
     // Create and run the egui app
     let options = eframe::NativeOptions {
