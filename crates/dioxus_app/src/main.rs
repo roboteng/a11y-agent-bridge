@@ -9,14 +9,20 @@
 //! Dioxus ships with Tokio by default, making MCP integration seamless!
 
 use dioxus::prelude::*;
+use std::sync::OnceLock;
+
+static MCP_PORT: OnceLock<u16> = OnceLock::new();
 
 fn main() {
     // Conditionally start the MCP server if feature is enabled
     // Dioxus already has a Tokio runtime, so we don't need to create one!
     #[cfg(feature = "a11y_mcp")]
-    let _mcp = {
-        // Listens on /tmp/accessibility_mcp_{PID}.sock
-        accessibility_mcp::start_mcp_server().expect("Failed to start MCP server")
+    let _mcp_handle = {
+        // Listens on http://127.0.0.1:{PORT}
+        // Port 3000 is requested, but will try successive ports if unavailable
+        let handle = accessibility_mcp::start_mcp_server(3000).expect("Failed to start MCP server");
+        MCP_PORT.set(handle.port).ok();
+        handle
     };
 
     // Launch the Dioxus app
@@ -25,6 +31,8 @@ fn main() {
 
 #[component]
 fn app() -> Element {
+    let mcp_port = MCP_PORT.get().copied().unwrap_or(0);
+
     let mut name = use_signal(|| String::new());
     let mut age = use_signal(|| 0u32);
     let mut notifications = use_signal(|| false);
@@ -48,7 +56,7 @@ fn app() -> Element {
                     p { "This app exposes its accessibility tree via MCP protocol." }
                     p {
                         style: "font-family: monospace; font-size: 12px;",
-                        "Socket: /tmp/accessibility_mcp_{std::process::id()}.sock"
+                        "HTTP: http://127.0.0.1:{mcp_port}/mcp"
                     }
                 } else {
                     p { style: "color: red; font-weight: bold;", "❌ MCP server is DISABLED" }
@@ -150,21 +158,16 @@ fn app() -> Element {
                     div {
                         style: "margin: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px;",
                         p {
-                            "The MCP server is listening on Unix socket:"
+                            "The MCP server is listening on HTTP:"
                         }
                         p {
                             style: "font-family: monospace; background: #eee; padding: 5px;",
-                            "/tmp/accessibility_mcp_{std::process::id()}.sock"
+                            "http://127.0.0.1:{mcp_port}/mcp"
                         }
-                        p { "Connect with:" }
+                        p { "Connect with curl:" }
                         p {
-                            style: "font-family: monospace; background: #eee; padding: 5px;",
-                            "nc -U /tmp/accessibility_mcp_{std::process::id()}.sock"
-                        }
-                        p { "Then send JSON-RPC requests:" }
-                        p {
-                            style: "font-family: monospace; background: #eee; padding: 5px;",
-                            r#"{{"protocol_version":"1.0","method":"query_tree"}}"#
+                            style: "font-family: monospace; background: #eee; padding: 5px; word-break: break-all;",
+                            "curl -X POST http://127.0.0.1:{mcp_port}/mcp -H 'Content-Type: application/json' -d '{{\"protocol_version\":\"1.0\",\"content\":{{\"request\":{{\"query_tree\":{{}}}}}}}}'"
                         }
                     }
                 }

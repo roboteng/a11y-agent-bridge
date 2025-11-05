@@ -3,15 +3,23 @@
 use crate::platform::{create_provider, AccessibilityProvider};
 use crate::protocol::{ErrorCode, Message, MessageContent, Request, Response, ResponseData};
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response as AxumResponse},
+    routing::post,
+    Json, Router,
+};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
+use tower_http::cors::CorsLayer;
 
 /// Handle for controlling the MCP server
 pub struct McpHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
+    /// The port the HTTP server is listening on
+    pub port: u16,
 }
 
 impl McpHandle {
@@ -32,29 +40,34 @@ impl Drop for McpHandle {
 }
 
 pub fn start_all() -> Result<(Runtime, McpHandle)> {
-    // Create a Tokio runtime for the MCP server
-    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-    let _runtime_guard = runtime.enter();
-
-    // Start the MCP server before creating the app
-    // Listens on /tmp/accessibility_mcp_{PID}.sock
-    let handle = start_mcp_server().expect("Failed to start MCP server");
-
-    // Keep the runtime alive
-    Ok((runtime, handle))
-}
-
-/// Start the MCP server on a Unix socket
-///
-/// The server will listen on `/tmp/accessibility_mcp_{PID}.sock`
-/// where PID is the process ID of the calling application.
-pub fn start_mcp_server() -> Result<McpHandle> {
     // Initialize logging (ignore if already initialized)
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_writer(std::io::stderr)
         .try_init();
 
+    // Create a Tokio runtime for the MCP server
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let _runtime_guard = runtime.enter();
+
+    // Start the MCP server before creating the app
+    // Listens on http://127.0.0.1:{PORT}
+    // Use port 0 to let the OS assign an arbitrary available port
+    let handle = start_mcp_server(0).expect("Failed to start MCP server");
+
+    // Keep the runtime alive
+    Ok((runtime, handle))
+}
+
+/// Start the MCP server on a local HTTP port
+///
+/// The server will listen on `http://127.0.0.1:{PORT}`
+///
+/// # Arguments
+///
+/// * `port` - The port to bind to. If 0, the OS will assign an arbitrary available port.
+///            If the specified port is unavailable, will try successive ports up to port+100.
+pub fn start_mcp_server(port: u16) -> Result<McpHandle> {
     tracing::info!("Starting accessibility MCP server");
 
     // Create the accessibility provider
@@ -62,35 +75,54 @@ pub fn start_mcp_server() -> Result<McpHandle> {
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    // Generate socket path based on PID
-    let pid = std::process::id();
-    let socket_path = PathBuf::from(format!("/tmp/accessibility_mcp_{}.sock", pid));
+    // Determine the actual port to use
+    let actual_port = if port == 0 {
+        // Let the OS assign an arbitrary port
+        0
+    } else {
+        // Try to find an available port starting from the requested port
+        find_available_port(port, port + 100)
+    };
 
-    // Spawn the Unix socket server
-    tokio::spawn(run_unix_socket_server(
+    // Spawn the HTTP server
+    let (port_tx, port_rx) = oneshot::channel();
+    tokio::spawn(run_http_server(
         Arc::new(provider),
         shutdown_rx,
-        socket_path.clone(),
+        actual_port,
+        port_tx,
     ));
 
-    tracing::info!("Unix socket server listening on {}", socket_path.display());
-    eprintln!("[MCP] listening on unix socket: {}", socket_path.display());
+    // Wait for the server to bind and get the actual port
+    let bound_port = port_rx
+        .blocking_recv()
+        .context("Failed to get bound port")?;
+
+    tracing::info!("HTTP server listening on http://127.0.0.1:{}", bound_port);
+    eprintln!("[MCP] listening on http://127.0.0.1:{}", bound_port);
 
     Ok(McpHandle {
         shutdown_tx: Some(shutdown_tx),
+        port: bound_port,
     })
 }
 
-/// Handle a single MCP request
-async fn handle_request(provider: &Arc<Box<dyn AccessibilityProvider>>, line: &str) -> Message {
-    // Parse the request
-    let message: Message = match serde_json::from_str(line) {
-        Ok(msg) => msg,
-        Err(e) => {
-            return Message::error(ErrorCode::Internal, format!("Invalid JSON: {}", e));
+/// Find an available port in the given range
+fn find_available_port(start: u16, end: u16) -> u16 {
+    for port in start..=end {
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
         }
-    };
+    }
+    // Fallback to start port if none available
+    start
+}
 
+/// Handle a single MCP request
+async fn handle_request(
+    provider: &Arc<Box<dyn AccessibilityProvider>>,
+    message: Message,
+) -> Message {
     // Check protocol version
     if message.protocol_version != Message::PROTOCOL_VERSION {
         return Message::error(
@@ -356,96 +388,79 @@ async fn handle_tools_list() -> Response {
     }
 }
 
-/// Run the Unix socket-based MCP server
-#[cfg(unix)]
-async fn run_unix_socket_server(
+/// Shared state for the HTTP server
+#[derive(Clone)]
+struct AppState {
     provider: Arc<Box<dyn AccessibilityProvider>>,
-    mut shutdown_rx: oneshot::Receiver<()>,
-    socket_path: PathBuf,
+}
+
+/// HTTP handler for MCP requests
+async fn mcp_handler(
+    State(state): State<AppState>,
+    Json(message): Json<Message>,
+) -> Result<Json<Message>, AppError> {
+    let response = handle_request(&state.provider, message).await;
+    Ok(Json(response))
+}
+
+/// Error wrapper for HTTP responses
+struct AppError(String);
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> AxumResponse {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(Message::error(ErrorCode::Internal, self.0)),
+        )
+            .into_response()
+    }
+}
+
+impl<E> From<E> for AppError
+where
+    E: std::error::Error,
+{
+    fn from(err: E) -> Self {
+        AppError(err.to_string())
+    }
+}
+
+/// Run the HTTP-based MCP server
+async fn run_http_server(
+    provider: Arc<Box<dyn AccessibilityProvider>>,
+    shutdown_rx: oneshot::Receiver<()>,
+    port: u16,
+    port_tx: oneshot::Sender<u16>,
 ) {
-    use tokio::net::UnixListener;
+    let state = AppState { provider };
 
-    // Remove old socket if it exists
-    let _ = std::fs::remove_file(&socket_path);
+    let app = Router::new()
+        .route("/mcp", post(mcp_handler))
+        .layer(CorsLayer::permissive())
+        .with_state(state);
 
-    let listener = match UnixListener::bind(&socket_path) {
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
         Err(e) => {
-            tracing::error!("Failed to bind Unix socket: {}", e);
+            tracing::error!("Failed to bind to {}: {}", addr, e);
             return;
         }
     };
 
-    tracing::info!("Unix socket server listening on {}", socket_path.display());
+    // Get the actual bound port (important when port 0 is used)
+    let bound_port = listener.local_addr().unwrap().port();
+    tracing::info!("HTTP server listening on http://127.0.0.1:{}", bound_port);
 
-    loop {
-        tokio::select! {
-            _ = &mut shutdown_rx => {
-                tracing::info!("Unix socket server shutting down");
-                let _ = std::fs::remove_file(&socket_path);
-                break;
-            }
-            result = listener.accept() => {
-                match result {
-                    Ok((stream, _addr)) => {
-                        let provider = Arc::clone(&provider);
-                        tokio::spawn(handle_unix_socket_connection(provider, stream));
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to accept connection: {}", e);
-                    }
-                }
-            }
-        }
-    }
-}
+    // Send the bound port back to the caller
+    let _ = port_tx.send(bound_port);
 
-#[cfg(unix)]
-async fn handle_unix_socket_connection(
-    provider: Arc<Box<dyn AccessibilityProvider>>,
-    stream: tokio::net::UnixStream,
-) {
-    let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
-    let mut line = String::new();
+    let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+        let _ = shutdown_rx.await;
+        tracing::info!("HTTP server shutting down");
+    });
 
-    loop {
-        line.clear();
-
-        match reader.read_line(&mut line).await {
-            Ok(0) => {
-                // EOF - client disconnected
-                break;
-            }
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                // Process the request
-                let response = handle_request(&provider, trimmed).await;
-
-                // Send response
-                if let Ok(json) = serde_json::to_string(&response) {
-                    if let Err(e) = writer.write_all(json.as_bytes()).await {
-                        tracing::error!("Failed to write response: {}", e);
-                        break;
-                    }
-                    if let Err(e) = writer.write_all(b"\n").await {
-                        tracing::error!("Failed to write newline: {}", e);
-                        break;
-                    }
-                    if let Err(e) = writer.flush().await {
-                        tracing::error!("Failed to flush: {}", e);
-                        break;
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::error!("Error reading from socket: {}", e);
-                break;
-            }
-        }
+    if let Err(e) = server.await {
+        tracing::error!("Server error: {}", e);
     }
 }

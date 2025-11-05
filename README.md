@@ -21,8 +21,11 @@ Coding agents can inspect and interact with native application UIs through the s
 use accessibility_mcp::start_all;
 
 fn main() -> anyhow::Result<()> {
-    // Starts Tokio runtime and MCP server on /tmp/accessibility_mcp_{PID}.sock
-    let _mcp = start_all()?;
+    // Starts Tokio runtime and MCP server on http://127.0.0.1:{PORT}
+    // Uses OS-assigned arbitrary port for maximum compatibility
+    let (_runtime, mcp_handle) = start_all()?;
+    
+    println!("MCP server listening on port {}", mcp_handle.port);
     
     // Your app runs here...
     Ok(())
@@ -35,8 +38,11 @@ fn main() -> anyhow::Result<()> {
 use accessibility_mcp::start_mcp_server;
 
 fn main() -> anyhow::Result<()> {
-    // Start the MCP server on /tmp/accessibility_mcp_{PID}.sock
-    let _mcp = start_mcp_server()?;
+    // Start the MCP server on http://127.0.0.1:{PORT}
+    // Pass desired port (e.g., 3000) or 0 for OS-assigned port
+    let mcp_handle = start_mcp_server(3000)?;
+    
+    println!("MCP server listening on port {}", mcp_handle.port);
     
     // Your app runs here...
     Ok(())
@@ -45,29 +51,38 @@ fn main() -> anyhow::Result<()> {
 
 ### Communicating with the Server
 
-The server uses JSON-RPC over a Unix domain socket. Send requests as JSON lines:
+The server uses JSON-RPC over HTTP. Send POST requests to the `/mcp` endpoint:
 
 **Request:**
-```json
-{"protocol_version":"1.0","method":"query_tree"}
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"query_tree":{}}}}'
 ```
 
 **Response:**
 ```json
 {
   "protocol_version":"1.0",
-  "status":"success",
-  "result":{
-    "nodes":[{
-      "id":"0x123456",
-      "role":"AXApplication",
-      "name":"My App",
-      "value":null,
-      "description":null,
-      "bounds":null,
-      "actions":["focus"],
-      "children":["0x123457","0x123458"]
-    }]
+  "content":{
+    "response":{
+      "success":{
+        "result":{
+          "tree":{
+            "nodes":[{
+              "id":"0x123456",
+              "role":"AXApplication",
+              "name":"My App",
+              "value":null,
+              "description":null,
+              "bounds":null,
+              "actions":["focus"],
+              "children":["0x123457","0x123458"]
+            }]
+          }
+        }
+      }
+    }
   }
 }
 ```
@@ -76,44 +91,34 @@ The server uses JSON-RPC over a Unix domain socket. Send requests as JSON lines:
 
 ### `query_tree`
 Get the accessibility tree (starting from root):
-```json
-{
-  "protocol_version":"1.0",
-  "method":"query_tree",
-  "max_depth":5,
-  "max_nodes":100
-}
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"query_tree":{"max_depth":5,"max_nodes":100}}}}'
 ```
 
 ### `get_node`
 Get details for a specific node:
-```json
-{
-  "protocol_version":"1.0",
-  "method":"get_node",
-  "node_id":"0x123456"
-}
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"get_node":{"node_id":"0x123456"}}}}'
 ```
 
 ### `perform_action`
 Perform an action on a node:
-```json
-{
-  "protocol_version":"1.0",
-  "method":"perform_action",
-  "node_id":"0x123456",
-  "action":{"type":"press"}
-}
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"perform_action":{"node_id":"0x123456","action":{"type":"press"}}}}}'
 ```
 
 ### `find_by_name`
 Find nodes by name:
-```json
-{
-  "protocol_version":"1.0",
-  "method":"find_by_name",
-  "name":"OK"
-}
+```bash
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"find_by_name":{"name":"OK"}}}}'
 ```
 
 ## Supported Actions
@@ -169,34 +174,50 @@ This library is designed to be consumed by AI coding agents like Claude Code. Th
 # 1. Start the app with MCP server enabled (using Dioxus for clean integration)
 cargo run -p dioxus_app --features a11y_mcp
 
+# Note the port number from the output, e.g., "listening on http://127.0.0.1:3000"
+
 # 2. Query the accessibility tree
-echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"query_tree":{}}}}'
 
 # 3. Traverse to find a slider (role: "AXSlider")
-echo '{"protocol_version":"1.0","method":"get_node","node_id":"<slider_id>"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"get_node":{"node_id":"<slider_id>"}}}}'
 
 # 4. Control the slider
-echo '{"protocol_version":"1.0","method":"perform_action","node_id":"<slider_id>","action":{"type":"increment"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"perform_action":{"node_id":"<slider_id>","action":{"type":"increment"}}}}}'
 
 # 5. Click a button
-echo '{"protocol_version":"1.0","method":"perform_action","node_id":"<button_id>","action":{"type":"press"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"perform_action":{"node_id":"<button_id>","action":{"type":"press"}}}}}'
 ```
 
 This enables automated UI testing, accessibility verification, and remote control of applications!
 
-## Socket Path
+## Server Address
 
-The server always listens on a Unix domain socket at:
-
-```
-/tmp/accessibility_mcp_{PID}.sock
-```
-
-Where `{PID}` is the process ID of your application. This path is automatically logged to stderr when the server starts:
+The server listens on a local HTTP port at:
 
 ```
-[MCP] listening on unix socket: /tmp/accessibility_mcp_12345.sock
+http://127.0.0.1:{PORT}
 ```
+
+The port can be specified when calling `start_mcp_server(port)`:
+- **Port 0**: OS assigns an arbitrary available port (used by `start_all()`)
+- **Specific port** (e.g., 3000): Tries that port, or successive ports if unavailable
+
+The URL is automatically logged to stderr when the server starts:
+
+```
+[MCP] listening on http://127.0.0.1:3000
+```
+
+The actual bound port is available via the `McpHandle.port` field.
 
 ## Examples
 
@@ -220,7 +241,7 @@ cargo run -p dioxus_app --features a11y_mcp
 
 The code simply calls:
 ```rust
-let _mcp = accessibility_mcp::start_mcp_server()?;
+let mcp_handle = accessibility_mcp::start_mcp_server(3000)?;
 ```
 
 #### Egui App (Uses `start_all`)
@@ -239,28 +260,37 @@ cargo run -p egui_app --features a11y_mcp
 
 The code simply calls:
 ```rust
-let _mcp = accessibility_mcp::start_all()?;
+let (_runtime, mcp_handle) = accessibility_mcp::start_all()?;
 ```
 
-When the `a11y_mcp` feature is enabled, the app will display the socket path in the UI. Connect to it:
+When the `a11y_mcp` feature is enabled, the app will display the HTTP URL in the UI. Connect to it:
 ```bash
-# Get the PID from the UI or from ps
-echo '{"protocol_version":"1.0","method":"query_tree"}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+# Get the port from the UI or from stderr output
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"query_tree":{}}}}'
 ```
 
 Example response:
 ```json
 {
   "protocol_version": "1.0",
-  "status": "success",
-  "result": {
-    "nodes": [{
-      "id": "0x6000008d41b0",
-      "role": "AXApplication",
-      "name": "egui_app",
-      "actions": [{"type": "focus"}],
-      "children": ["0x6000008d4200", "0x6000008d4300"]
-    }]
+  "content": {
+    "response": {
+      "success": {
+        "result": {
+          "tree": {
+            "nodes": [{
+              "id": "0x6000008d41b0",
+              "role": "AXApplication",
+              "name": "egui_app",
+              "actions": [{"type": "focus"}],
+              "children": ["0x6000008d4200", "0x6000008d4300"]
+            }]
+          }
+        }
+      }
+    }
   }
 }
 ```
@@ -268,7 +298,9 @@ Example response:
 You can then query child nodes, find buttons, sliders, etc., and perform actions on them:
 ```bash
 # Find a slider and increment it
-echo '{"protocol_version":"1.0","method":"perform_action","node_id":"0x123abc","action":{"type":"increment"}}' | nc -U /tmp/accessibility_mcp_<PID>.sock
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","content":{"request":{"perform_action":{"node_id":"0x123abc","action":{"type":"increment"}}}}}'
 ```
 
 ### Library Examples
@@ -288,7 +320,6 @@ cargo run -p accessibility_mcp --example test_provider
 - Bounds/coordinates not extracted yet
 - `set_value` action not yet implemented
 - `scroll` and `context_menu` actions not yet implemented
-- `find_by_name` not implemented (requires manual tree traversal)
 - macOS only (Windows and Linux planned)
 - Requires accessibility permissions on macOS
 
@@ -296,10 +327,11 @@ cargo run -p accessibility_mcp --example test_provider
 
 - ✅ Full accessibility tree traversal with children enumeration
 - ✅ Actions: `focus`, `press`, `increment`, `decrement`
-- ✅ Unix socket transport
-- ✅ Finding UI elements by traversing the tree
+- ✅ HTTP transport with JSON-RPC protocol
+- ✅ CORS-enabled for web-based clients
+- ✅ Finding UI elements by name and traversing the tree
 - ✅ Performing actions on buttons, sliders, and other controls
-- ✅ Successfully tested with egui applications
+- ✅ Successfully tested with egui and Dioxus applications
 
 ## Architecture
 

@@ -9,8 +9,9 @@
 //! use accessibility_mcp::start_all;
 //!
 //! fn main() -> anyhow::Result<()> {
-//!     // Starts server on /tmp/accessibility_mcp_{PID}.sock
-//!     let _mcp = start_all()?;
+//!     // Starts server on http://127.0.0.1:{PORT} with OS-assigned port
+//!     let (_runtime, mcp_handle) = start_all()?;
+//!     println!("Server listening on port {}", mcp_handle.port);
 //!     // Your app runs here...
 //!     Ok(())
 //! }
@@ -48,7 +49,8 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "macos")]
     async fn can_start_mcp_server() {
-        let handle = start_mcp_server().expect("Should be able to start MCP server");
+        let handle = start_mcp_server(0).expect("Should be able to start MCP server");
+        assert!(handle.port > 0, "Should have a valid port assigned");
         handle.shutdown();
     }
 

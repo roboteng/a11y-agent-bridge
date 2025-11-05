@@ -7,16 +7,16 @@
 mod accesskit_tests {
     use serde_json::json;
     use serial_test::serial;
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-    use std::process::{Child, Command};
+    use std::io::{BufRead, BufReader};
+    use std::process::{Child, Command, Stdio};
     use std::time::Duration;
     use tokio::time::sleep;
 
     /// Helper struct to manage the egui app process and cleanup
     struct TestApp {
         process: Child,
-        socket_path: String,
+        http_url: String,
+        client: reqwest::Client,
     }
 
     impl TestApp {
@@ -29,54 +29,92 @@ mod accesskit_tests {
 
             assert!(status.success(), "Failed to build egui_app");
 
-            // Start the egui_app in the background
-            let process = Command::new("cargo")
+            // Start the egui_app in the background, capturing stderr to find the port
+            let mut process = Command::new("cargo")
                 .args(&["run", "-p", "egui_app", "--features", "a11y_mcp"])
+                .stderr(Stdio::piped())
                 .spawn()
                 .expect("Failed to start egui_app");
 
-            // Wait a bit for the app to start and create the socket
-            sleep(Duration::from_secs(5)).await;
+            // Read stderr to find the HTTP port
+            let stderr = process.stderr.take().expect("Failed to capture stderr");
+            let reader = BufReader::new(stderr);
 
-            // Find the socket file
-            let pid = process.id();
-            let socket_path = format!("/tmp/accessibility_mcp_{}.sock", pid);
+            let mut http_url = None;
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    eprintln!("{}", line); // Print to test output
+                    if line.contains("[MCP] listening on") {
+                        // Extract URL from "[MCP] listening on http://127.0.0.1:3000"
+                        if let Some(start) = line.find("http://") {
+                            let url = line[start..].trim().to_string();
+                            http_url = Some(url);
+                            break;
+                        }
+                    }
+                }
+            }
 
-            // Verify socket exists
+            let http_url = http_url.unwrap_or_else(|| {
+                // Fallback: assume default port 3000
+                "http://127.0.0.1:3000".to_string()
+            });
+
+            // Wait for server to be ready
+            let client = reqwest::Client::new();
             let mut retries = 0;
-            while !std::path::Path::new(&socket_path).exists() && retries < 10 {
+            while retries < 20 {
                 sleep(Duration::from_millis(500)).await;
+
+                // Try to connect to verify server is up
+                let test_request = json!({
+                    "protocol_version": "1.0",
+                    "method": "initialize",
+                    "protocol_version": "1.0"
+                });
+
+                if let Ok(response) = client
+                    .post(format!("{}/mcp", http_url))
+                    .json(&test_request)
+                    .send()
+                    .await
+                {
+                    if response.status().is_success() {
+                        break;
+                    }
+                }
+
                 retries += 1;
             }
 
-            assert!(
-                std::path::Path::new(&socket_path).exists(),
-                "Socket file not found at {}",
-                socket_path
-            );
+            assert!(retries < 20, "Server did not start within timeout");
 
             Self {
                 process,
-                socket_path,
+                http_url,
+                client,
             }
         }
 
-        fn send_request(&self, request: serde_json::Value) -> serde_json::Value {
-            let mut stream =
-                UnixStream::connect(&self.socket_path).expect("Failed to connect to Unix socket");
+        async fn send_request(&self, request: serde_json::Value) -> serde_json::Value {
+            let response = self
+                .client
+                .post(format!("{}/mcp", self.http_url))
+                .json(&request)
+                .send()
+                .await
+                .expect("Failed to send HTTP request");
 
-            // Send request
-            let request_str = serde_json::to_string(&request).unwrap();
-            writeln!(stream, "{}", request_str).expect("Failed to write request");
+            assert!(
+                response.status().is_success(),
+                "HTTP request failed with status: {}",
+                response.status()
+            );
 
-            // Read response
-            let mut reader = BufReader::new(&stream);
-            let mut response_line = String::new();
-            reader
-                .read_line(&mut response_line)
-                .expect("Failed to read response");
-
-            serde_json::from_str(&response_line).expect("Failed to parse response")
+            response
+                .json()
+                .await
+                .expect("Failed to parse JSON response")
         }
     }
 
@@ -86,7 +124,7 @@ mod accesskit_tests {
             let _ = self.process.kill();
             let _ = self.process.wait();
 
-            // Give the system time to clean up the socket and release resources
+            // Give the system time to release resources
             std::thread::sleep(Duration::from_millis(500));
         }
     }
@@ -100,23 +138,39 @@ mod accesskit_tests {
         // Test 1: Query the accessibility tree
         let query_request = json!({
             "protocol_version": "1.0",
-            "method": "query_tree"
+            "content": {
+                "request": {
+                    "query_tree": {}
+                }
+            }
         });
 
-        let response = app.send_request(query_request);
-        assert_eq!(response["status"], "success", "Query tree failed");
+        let response = app.send_request(query_request).await;
+        assert_eq!(
+            response["content"]["response"]["success"]["result"]["tree"]
+                .as_object()
+                .is_some(),
+            true,
+            "Query tree failed"
+        );
 
         // Test 2: Find all accessible nodes
         let find_request = json!({
             "protocol_version": "1.0",
-            "method": "find_by_name",
-            "name": ""
+            "content": {
+                "request": {
+                    "find_by_name": {
+                        "name": ""
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(find_request);
-        assert_eq!(response["status"], "success");
+        let response = app.send_request(find_request).await;
+        let nodes = response["content"]["response"]["success"]["result"]["nodes"]
+            .as_array()
+            .unwrap();
 
-        let nodes = response["result"]["nodes"].as_array().unwrap();
         assert!(
             nodes.len() >= 5,
             "Expected at least 5 accessible nodes (app, window, buttons, checkbox), found {}",
@@ -160,15 +214,21 @@ mod accesskit_tests {
         // Find all nodes
         let find_request = json!({
             "protocol_version": "1.0",
-            "method": "find_by_name",
-            "name": ""
+            "content": {
+                "request": {
+                    "find_by_name": {
+                        "name": ""
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(find_request);
-        assert_eq!(response["status"], "success");
+        let response = app.send_request(find_request).await;
 
         // Find the window
-        let nodes = response["result"]["nodes"].as_array().unwrap();
+        let nodes = response["content"]["response"]["success"]["result"]["nodes"]
+            .as_array()
+            .unwrap();
         let window_node = nodes
             .iter()
             .find(|n| n["role"] == "AXWindow")
@@ -179,36 +239,59 @@ mod accesskit_tests {
         // Get window's children
         let get_node_request = json!({
             "protocol_version": "1.0",
-            "method": "get_node",
-            "node_id": window_id
+            "content": {
+                "request": {
+                    "get_node": {
+                        "node_id": window_id
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(get_node_request);
-        let window_children = response["result"]["node"]["children"].as_array().unwrap();
+        let response = app.send_request(get_node_request).await;
+        let window_children =
+            response["content"]["response"]["success"]["result"]["node"]["children"]
+                .as_array()
+                .unwrap();
 
         // Find the main content group (first child is usually the content)
         let group_id = window_children[0].as_str().unwrap();
 
         let get_group_request = json!({
             "protocol_version": "1.0",
-            "method": "get_node",
-            "node_id": group_id
+            "content": {
+                "request": {
+                    "get_node": {
+                        "node_id": group_id
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(get_group_request);
-        let group_children = response["result"]["node"]["children"].as_array().unwrap();
+        let response = app.send_request(get_group_request).await;
+        let group_children =
+            response["content"]["response"]["success"]["result"]["node"]["children"]
+                .as_array()
+                .unwrap();
 
         // Find the slider among group children
         let mut slider_id = None;
         for child_id in group_children {
             let child_request = json!({
                 "protocol_version": "1.0",
-                "method": "get_node",
-                "node_id": child_id.as_str().unwrap()
+                "content": {
+                    "request": {
+                        "get_node": {
+                            "node_id": child_id.as_str().unwrap()
+                        }
+                    }
+                }
             });
 
-            let child_response = app.send_request(child_request);
-            if child_response["result"]["node"]["role"] == "AXSlider" {
+            let child_response = app.send_request(child_request).await;
+            if child_response["content"]["response"]["success"]["result"]["node"]["role"]
+                == "AXSlider"
+            {
                 slider_id = Some(child_id.as_str().unwrap().to_string());
                 break;
             }
@@ -220,12 +303,19 @@ mod accesskit_tests {
         // Verify slider has increment/decrement actions
         let get_slider_request = json!({
             "protocol_version": "1.0",
-            "method": "get_node",
-            "node_id": slider_id
+            "content": {
+                "request": {
+                    "get_node": {
+                        "node_id": slider_id
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(get_slider_request);
-        let actions = response["result"]["node"]["actions"].as_array().unwrap();
+        let response = app.send_request(get_slider_request).await;
+        let actions = response["content"]["response"]["success"]["result"]["node"]["actions"]
+            .as_array()
+            .unwrap();
 
         let has_increment = actions.iter().any(|a| a["type"] == "increment");
         let has_decrement = actions.iter().any(|a| a["type"] == "decrement");
@@ -236,31 +326,43 @@ mod accesskit_tests {
         // Test 5: Try to increment the slider
         let increment_request = json!({
             "protocol_version": "1.0",
-            "method": "perform_action",
-            "node_id": slider_id,
-            "action": {"type": "increment"}
+            "content": {
+                "request": {
+                    "perform_action": {
+                        "node_id": slider_id,
+                        "action": {"type": "increment"}
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(increment_request);
-        assert_eq!(response["status"], "success", "Increment action failed");
-        assert_eq!(
-            response["result"]["success"], true,
-            "Increment action reported failure"
+        let response = app.send_request(increment_request).await;
+        assert!(
+            response["content"]["response"]["success"]["result"]["action_result"]["success"]
+                .as_bool()
+                .unwrap(),
+            "Increment action failed"
         );
 
         // Test 6: Try to decrement the slider
         let decrement_request = json!({
             "protocol_version": "1.0",
-            "method": "perform_action",
-            "node_id": slider_id,
-            "action": {"type": "decrement"}
+            "content": {
+                "request": {
+                    "perform_action": {
+                        "node_id": slider_id,
+                        "action": {"type": "decrement"}
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(decrement_request);
-        assert_eq!(response["status"], "success", "Decrement action failed");
-        assert_eq!(
-            response["result"]["success"], true,
-            "Decrement action reported failure"
+        let response = app.send_request(decrement_request).await;
+        assert!(
+            response["content"]["response"]["success"]["result"]["action_result"]["success"]
+                .as_bool()
+                .unwrap(),
+            "Decrement action failed"
         );
 
         println!("✅ Slider is accessible and interactive via MCP protocol");
@@ -285,14 +387,19 @@ mod accesskit_tests {
 
         let find_request = json!({
             "protocol_version": "1.0",
-            "method": "find_by_name",
-            "name": ""
+            "content": {
+                "request": {
+                    "find_by_name": {
+                        "name": ""
+                    }
+                }
+            }
         });
 
-        let response = app.send_request(find_request);
-        assert_eq!(response["status"], "success");
-
-        let nodes = response["result"]["nodes"].as_array().unwrap();
+        let response = app.send_request(find_request).await;
+        let nodes = response["content"]["response"]["success"]["result"]["nodes"]
+            .as_array()
+            .unwrap();
 
         // If AccessKit is still lazy, we'd only see 1 node (the application)
         // With enable_accesskit() called, we should see 5+ nodes

@@ -66,7 +66,7 @@ accessibility tree and actions, using the same interfaces as real assistive tech
               v
 +---------------------------+
 | MCP Server                |
-|  (JSON-RPC over socket)   |
+|  (JSON-RPC over HTTP)     |
 +-------------+-------------+
               |
               | Commands / responses
@@ -127,13 +127,18 @@ pub fn start_mcp_server() -> anyhow::Result<McpHandle>;
 pub fn start_all() -> anyhow::Result<(tokio::runtime::Runtime, McpHandle)>;
 ```
 
-The socket path is automatically generated based on the process ID.
+The HTTP port is specified as a parameter to `start_mcp_server(port)`:
+- Port 0 lets the OS assign an arbitrary port (used by `start_all()`)
+- A specific port (e.g., 3000) will be attempted, with fallback to successive ports if unavailable
+
+The actual bound port is available via `McpHandle.port`.
 
 #### `McpHandle`
 
 ```rust
 pub struct McpHandle {
     shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    pub port: u16,
 }
 ```
 
@@ -357,19 +362,19 @@ should suffice.
 
 | Transport | Use Case | Notes |
 |------------|-----------|-------|
-| **unix socket** | Default and only transport. Suitable for all use cases. | Path is auto-generated or configurable. Logged on startup. |
+| **HTTP** | Default and only transport. Suitable for all use cases. | Port is specified via `start_mcp_server(port)` parameter. Use 0 for OS-assigned port. Logged on startup. Accessible via `http://127.0.0.1:{PORT}/mcp` |
 
 ### Discovery
 
 By default, the server prints its transport details to stderr in a structured form:
 
 ```
-[MCP] listening on unix socket: /tmp/accessibility_mcp_<pid>.sock
-````
+[MCP] listening on http://127.0.0.1:3000
+```
 
-Agents can discover or attach using these details.
-No discovery protocol is implemented initially; later versions may include
-an environment-variable-based registration system (`ACCESSIBILITY_MCP_SOCKET`).
+Agents can discover the port either from stderr output or via the `McpHandle.port` field.
+The server uses HTTP with JSON-RPC protocol and includes CORS headers for web-based clients.
+Later versions may include an environment-variable-based registration system (`ACCESSIBILITY_MCP_PORT`).
 
 ---
 
@@ -639,4 +644,4 @@ that can be implemented confidently. The main remaining risks are:
 * Ensuring stable NodeId mapping in dynamic UIs.
 
 With these considerations addressed, the project can proceed to a Phase 1 prototype
-on macOS using Unix socket transport and expand from there.
+on macOS using HTTP transport and expand from there.

@@ -11,7 +11,11 @@ use eframe::egui;
 fn main() -> eframe::Result {
     // Conditionally start the MCP server if feature is enabled
     #[cfg(feature = "a11y_mcp")]
-    let _mcp = accessibility_mcp::start_all().expect("Failed to start MCP server");
+    let (_runtime, mcp_handle) =
+        accessibility_mcp::start_all().expect("Failed to start MCP server");
+
+    #[cfg(feature = "a11y_mcp")]
+    let mcp_port = mcp_handle.port;
 
     // Create and run the egui app
     let options = eframe::NativeOptions {
@@ -24,16 +28,49 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Accessibility MCP Demo",
         options,
-        Box::new(|_cc| Ok(Box::new(DemoApp::default()))),
+        Box::new(move |_cc| {
+            #[cfg(feature = "a11y_mcp")]
+            return Ok(Box::new(DemoApp::new(mcp_port)));
+
+            #[cfg(not(feature = "a11y_mcp"))]
+            return Ok(Box::new(DemoApp::default()));
+        }),
     )
 }
 
-#[derive(Default)]
 struct DemoApp {
     name: String,
     age: u32,
     checkbox: bool,
     slider_value: f32,
+    #[cfg(feature = "a11y_mcp")]
+    mcp_port: u16,
+}
+
+impl Default for DemoApp {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            age: 0,
+            checkbox: false,
+            slider_value: 0.0,
+            #[cfg(feature = "a11y_mcp")]
+            mcp_port: 0,
+        }
+    }
+}
+
+impl DemoApp {
+    #[cfg(feature = "a11y_mcp")]
+    fn new(mcp_port: u16) -> Self {
+        Self {
+            name: String::new(),
+            age: 0,
+            checkbox: false,
+            slider_value: 0.0,
+            mcp_port,
+        }
+    }
 }
 
 impl eframe::App for DemoApp {
@@ -88,13 +125,13 @@ impl eframe::App for DemoApp {
 
             #[cfg(feature = "a11y_mcp")]
             ui.collapsing("MCP Protocol Info", |ui| {
-                let pid = std::process::id();
-                ui.label(format!("The MCP server is listening on Unix socket:"));
-                ui.monospace(format!("/tmp/accessibility_mcp_{}.sock", pid));
-                ui.label("Connect with:");
-                ui.monospace(format!("nc -U /tmp/accessibility_mcp_{}.sock", pid));
-                ui.label("Then send JSON-RPC requests:");
-                ui.monospace(r#"{"protocol_version":"1.0","method":"query_tree"}"#);
+                ui.label("The MCP server is listening on HTTP:");
+                ui.monospace(format!("http://127.0.0.1:{}/mcp", self.mcp_port));
+                ui.label("Connect with curl:");
+                ui.monospace(format!(
+                    "curl -X POST http://127.0.0.1:{}/mcp -H 'Content-Type: application/json' -d '{{\"protocol_version\":\"1.0\",\"content\":{{\"request\":{{\"query_tree\":{{}}}}}}}}'",
+                    self.mcp_port
+                ));
             });
         });
     }
